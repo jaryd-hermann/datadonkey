@@ -69,7 +69,7 @@ export async function askPostHog(
   const textParts: string[] = [];
   const toolCalls: AskPostHogResult["toolCalls"] = [];
 
-  for (const block of res.content as Array<Record<string, unknown>>) {
+  for (const block of res.content as unknown as Array<Record<string, unknown>>) {
     if (block.type === "text" && typeof block.text === "string") {
       textParts.push(block.text);
     }

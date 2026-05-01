@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Single-tenant prototype: there is exactly one Connection row.
+// id is hardcoded to "default" so we can upsert.
+model Connection {
+  id               String   @id @default("default")
+  posthogApiKey    String
+  posthogProjectId String
+  posthogHost      String   @default("https://us.posthog.com")
+  updatedAt        DateTime @updatedAt
+}
+
+model Meeting {
+  id          String     @id @default(cuid())
+  recallBotId String     @unique
+  meetingUrl  String
+  status      String
+  createdAt   DateTime   @default(now())
+  endedAt     DateTime?
+  questions   Question[]
+}
+
+model Question {
+  id         String   @id @default(cuid())
+  meetingId  String
+  meeting    Meeting  @relation(fields: [meetingId], references: [id])
+  askerName  String?
+  question   String
+  answer     String
+  latencyMs  Int?
+  createdAt  DateTime @default(now())
+}
