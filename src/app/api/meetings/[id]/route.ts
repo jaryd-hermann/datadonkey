@@ -14,22 +14,27 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  let participants: Array<{ name: string; email?: string | null }> = [];
-  if (meeting.participants) {
+  const safeJson = <T>(s: string | null, fallback: T): T => {
+    if (!s) return fallback;
     try {
-      participants = JSON.parse(meeting.participants);
+      return JSON.parse(s) as T;
     } catch {
-      // ignore
+      return fallback;
     }
-  }
-  let followups: Array<{ question: string; reasoning: string }> = [];
-  if (meeting.followups) {
-    try {
-      followups = JSON.parse(meeting.followups);
-    } catch {
-      // ignore
-    }
-  }
+  };
+
+  const participants = safeJson<Array<{ name: string; email?: string | null }>>(
+    meeting.participants,
+    [],
+  );
+  const followups = safeJson<
+    Array<{
+      question: string;
+      reasoning: string;
+      answer?: string;
+      posthogUrls?: string[];
+    }>
+  >(meeting.followups, []);
 
   return NextResponse.json({
     meeting: {

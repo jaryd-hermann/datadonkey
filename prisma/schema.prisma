@@ -27,8 +27,11 @@ model Meeting {
   endedAt       DateTime?
   participants  String?    // JSON: [{name, email?}]
   transcript    String?    // formatted as "Speaker: text\n…"
-  followups     String?    // JSON: [{question, reasoning}]
+  followups     String?    // JSON: [{question, reasoning, answer?, posthogUrls?[]}]
   followupsAt   DateTime?
+  emailSubject  String?
+  emailDraft    String?
+  emailDraftAt  DateTime?
   questions     Question[]
 }
 

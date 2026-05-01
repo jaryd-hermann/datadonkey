@@ -95,6 +95,20 @@ export async function askPostHog(
 export interface FollowupQuestion {
   question: string;
   reasoning: string;
+  answer?: string;
+  posthogUrls?: string[];
+}
+
+export interface EmailDraft {
+  subject: string;
+  body: string;
+}
+
+const POSTHOG_URL_RE = /https?:\/\/[^\s)]*posthog\.com[^\s)]*/gi;
+
+export function extractPostHogUrls(text: string): string[] {
+  const matches = text.match(POSTHOG_URL_RE) ?? [];
+  return Array.from(new Set(matches.map((u) => u.replace(/[.,;:!?]+$/, ""))));
 }
 
 // Identifies genuine PostHog/analytics questions from a meeting transcript.
@@ -150,4 +164,87 @@ Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence w
     console.error("[analyzeTranscript] raw text:\n" + cleaned);
     return [];
   }
+}
+
+export interface ComposeInput {
+  meetingTitle: string | null;
+  participants: Array<{ name: string; email?: string | null }>;
+  qa: Array<{ question: string; reasoning: string; answer: string; posthogUrls: string[] }>;
+}
+
+export async function composeFollowupEmail(input: ComposeInput): Promise<EmailDraft> {
+  const { meetingTitle, participants, qa } = input;
+
+  const qaBlock = qa
+    .map(
+      (item, i) =>
+        `Q${i + 1}: ${item.question}\nWhy this came up: ${item.reasoning}\nPostHog answer: ${item.answer}\nPostHog links: ${item.posthogUrls.length ? item.posthogUrls.join(" ") : "(none)"}`,
+    )
+    .join("\n\n");
+
+  const userMsg = `Meeting title: ${meetingTitle ?? "(untitled)"}
+Participants: ${participants.map((p) => p.name).join(", ") || "(unknown)"}
+
+Questions and answers from PostHog:
+
+${qaBlock}`;
+
+  const res = await anthropic.messages.create({
+    model: "claude-opus-4-5",
+    max_tokens: 1500,
+    system: `You draft a brief, actionable follow-up email to participants of a meeting where data-shaped questions came up.
+
+Hard rules:
+- Bottom line up front. The first sentence after the greeting is the single most important takeaway, with concrete numbers if you have them.
+- Be direct and useful. No "I hope this email finds you well", no filler, no apologies.
+- If an answer was inconclusive or PostHog couldn't query it, say so plainly — don't pad.
+- Preserve every PostHog URL you receive. Inline them next to the relevant finding so people can click through.
+- Keep it tight. ~150-300 words for the body.
+
+Output format (return EXACTLY this, no code fences, no commentary):
+
+Subject: <one-line, informative, no fluff>
+
+Hi team,
+
+<TL;DR sentence — the headline finding>
+
+What we found
+- <Finding 1, with concrete number, then a PostHog link if available>
+- <Finding 2 …>
+- <…>
+
+What to do next
+- <Specific actionable step 1>
+- <Specific actionable step 2>
+- <(optional) step 3>
+
+— PostHog (via the meeting bot)`,
+    messages: [{ role: "user", content: userMsg }],
+  });
+
+  const text = res.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { type: "text"; text: string }).text)
+    .join("\n")
+    .trim();
+
+  // First line should be `Subject: ...`. Pull it off, the rest is the body.
+  const lines = text.split(/\r?\n/);
+  let subject = "";
+  let bodyStart = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^Subject:\s*(.+)$/i);
+    if (m) {
+      subject = m[1].trim();
+      bodyStart = i + 1;
+      break;
+    }
+  }
+  const body = lines.slice(bodyStart).join("\n").trim();
+
+  return {
+    subject: subject || "Meeting follow-up",
+    body: body || text,
+  };
 }
