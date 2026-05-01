@@ -18,13 +18,18 @@ model Connection {
 }
 
 model Meeting {
-  id          String     @id @default(cuid())
-  recallBotId String     @unique
-  meetingUrl  String
-  status      String
-  createdAt   DateTime   @default(now())
-  endedAt     DateTime?
-  questions   Question[]
+  id            String     @id @default(cuid())
+  recallBotId   String     @unique
+  meetingUrl    String
+  title         String?
+  status        String
+  createdAt     DateTime   @default(now())
+  endedAt       DateTime?
+  participants  String?    // JSON: [{name, email?}]
+  transcript    String?    // formatted as "Speaker: text\n…"
+  followups     String?    // JSON: [{question, reasoning}]
+  followupsAt   DateTime?
+  questions     Question[]
 }
 
 model Question {

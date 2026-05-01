@@ -1,6 +1,6 @@
 // Minimal Recall.ai client. Docs: https://docs.recall.ai/
 
-const REGION = process.env.RECALL_REGION ?? "us-east-1";
+const REGION = process.env.RECALL_REGION ?? "us-west-2";
 const BASE_URL = `https://${REGION}.recall.ai`;
 
 function authHeader(): Record<string, string> | null {
@@ -18,7 +18,14 @@ export interface CreateBotInput {
 export interface CreateBotResponse {
   id: string;
   meeting_url: string;
-  status_changes?: Array<{ code: string; created_at: string }>;
+}
+
+function transcriptionProvider() {
+  const dg = process.env.DEEPGRAM_API_KEY;
+  if (dg) {
+    return { deepgram_streaming: { deepgram_api_key: dg } };
+  }
+  return { meeting_captions: {} };
 }
 
 export async function createBot(input: CreateBotInput): Promise<CreateBotResponse> {
@@ -29,14 +36,12 @@ export async function createBot(input: CreateBotInput): Promise<CreateBotRespons
     meeting_url: input.meetingUrl,
     bot_name: input.botName ?? "PostHog",
     recording_config: {
-      transcript: {
-        provider: { meeting_captions: {} },
-      },
+      transcript: { provider: transcriptionProvider() },
       realtime_endpoints: [
         {
           type: "webhook",
           url: input.webhookUrl,
-          events: ["transcript.data", "transcript.partial_data"],
+          events: ["transcript.data", "bot.status_change"],
         },
       ],
     },
@@ -74,4 +79,79 @@ export async function sendChatMessage(botId: string, message: string): Promise<v
   } catch (err) {
     console.error(`[recall] sendChatMessage error:`, err);
   }
+}
+
+export async function getBot(botId: string): Promise<unknown> {
+  const auth = authHeader();
+  if (!auth) throw new Error("RECALL_API_KEY is not set");
+  const res = await fetch(`${BASE_URL}/api/v1/bot/${botId}/`, { headers: auth });
+  if (!res.ok) throw new Error(`Recall getBot failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// Returns a flat array of {speaker, text} ordered by start time.
+export interface TranscriptLine {
+  speaker: string | null;
+  text: string;
+}
+
+export async function getTranscriptLines(botId: string): Promise<TranscriptLine[]> {
+  const auth = authHeader();
+  if (!auth) throw new Error("RECALL_API_KEY is not set");
+  const res = await fetch(`${BASE_URL}/api/v1/bot/${botId}/transcript/`, { headers: auth });
+  if (!res.ok) throw new Error(`Recall getTranscript failed: ${res.status} ${await res.text()}`);
+  const raw = (await res.json()) as Array<Record<string, unknown>>;
+
+  // Recall's transcript endpoint returns chunks; shape varies slightly across
+  // payload versions. Each chunk has either `participant.name` or
+  // `speaker_name`, and either a flat `text` field or a `words[]` array.
+  return raw.map((chunk) => {
+    const speaker =
+      ((chunk.participant as Record<string, unknown> | undefined)?.name as string | null | undefined) ??
+      ((chunk.speaker as Record<string, unknown> | undefined)?.name as string | null | undefined) ??
+      (typeof chunk.speaker === "string" ? chunk.speaker : null) ??
+      (typeof chunk.speaker_name === "string" ? chunk.speaker_name : null) ??
+      null;
+    const directText = typeof chunk.text === "string" ? chunk.text : null;
+    const words = Array.isArray(chunk.words)
+      ? (chunk.words as Array<{ text?: string }>).map((w) => w.text ?? "").join(" ")
+      : null;
+    const text = (directText ?? words ?? "").replace(/\s+([.,!?])/g, "$1").trim();
+    return { speaker, text };
+  }).filter((l) => l.text.length > 0);
+}
+
+export interface ParticipantSummary {
+  name: string;
+  email?: string | null;
+}
+
+// Best-effort participant extraction from a getBot() payload. Recall has a
+// few payload shapes; we look in the common places and fall back to inferring
+// from the transcript on the caller's side.
+export function extractParticipants(bot: unknown): ParticipantSummary[] {
+  const b = bot as Record<string, unknown>;
+  const out: ParticipantSummary[] = [];
+  const seen = new Set<string>();
+
+  const candidates: unknown[] = [];
+  if (Array.isArray(b?.participants)) candidates.push(...(b.participants as unknown[]));
+  const meta = b?.meeting_metadata as Record<string, unknown> | undefined;
+  if (Array.isArray(meta?.participants)) candidates.push(...(meta!.participants as unknown[]));
+  if (Array.isArray(meta?.attendees)) candidates.push(...(meta!.attendees as unknown[]));
+
+  for (const c of candidates) {
+    const p = c as Record<string, unknown>;
+    const name =
+      (typeof p.name === "string" ? p.name : null) ??
+      (typeof p.display_name === "string" ? p.display_name : null);
+    if (!name) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push({
+      name,
+      email: typeof p.email === "string" ? p.email : null,
+    });
+  }
+  return out;
 }

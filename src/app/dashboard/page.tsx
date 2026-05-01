@@ -115,9 +115,10 @@ export default function Dashboard() {
             </div>
           )}
           {meetings.map((m) => (
-            <div
+            <a
               key={m.id}
-              className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+              href={`/dashboard/${m.id}`}
+              className="block rounded-lg border border-zinc-200 bg-white p-4 transition hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800/60"
             >
               <div className="flex items-center justify-between">
                 <div className="truncate font-mono text-sm text-zinc-700 dark:text-zinc-300">
@@ -150,7 +151,7 @@ export default function Dashboard() {
                   ))}
                 </ul>
               )}
-            </div>
+            </a>
           ))}
         </div>
       </div>

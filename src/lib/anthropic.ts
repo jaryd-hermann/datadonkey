@@ -91,3 +91,63 @@ export async function askPostHog(
     raw: res,
   };
 }
+
+export interface FollowupQuestion {
+  question: string;
+  reasoning: string;
+}
+
+// Identifies genuine PostHog/analytics questions from a meeting transcript.
+// Doesn't actually query PostHog — that's the next phase. We only want the
+// list of questions worth asking.
+export async function analyzeTranscript(transcript: string): Promise<FollowupQuestion[]> {
+  if (!transcript.trim()) return [];
+
+  const res = await anthropic.messages.create({
+    model: "claude-opus-4-5",
+    max_tokens: 4096,
+    system: `You read meeting transcripts and surface concrete data questions
+that the team would benefit from having answered with PostHog analytics.
+
+Rules:
+- Only include questions where the answer would be actionable and where
+  PostHog (event analytics, feature flags, experiments, dashboards, error
+  tracking) could plausibly answer it.
+- Skip rhetorical questions, hypotheticals, opinions, and anything not
+  data-shaped.
+- 0–5 items. If nothing qualifies, return an empty array.
+- Each question must be self-contained (no "this", "that thing", "the X we
+  discussed" — replace with the concrete subject).
+- Return ONLY a JSON array. No prose, no code fences.
+
+Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence why this came up in the meeting>"}]`,
+    messages: [{ role: "user", content: transcript }],
+  });
+
+  const text = res.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { type: "text"; text: string }).text)
+    .join("\n")
+    .trim();
+
+  // Strip optional code fences if Claude added them despite the instruction.
+  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+
+  try {
+    const parsed = JSON.parse(cleaned) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((p) => {
+      const obj = p as { question?: unknown; reasoning?: unknown };
+      if (typeof obj.question !== "string") return [];
+      return [{
+        question: obj.question,
+        reasoning: typeof obj.reasoning === "string" ? obj.reasoning : "",
+      }];
+    });
+  } catch (err) {
+    console.error("[analyzeTranscript] failed to parse JSON:", err);
+    console.error("[analyzeTranscript] raw text length:", cleaned.length);
+    console.error("[analyzeTranscript] raw text:\n" + cleaned);
+    return [];
+  }
+}
