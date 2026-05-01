@@ -20,10 +20,13 @@ export interface CreateBotResponse {
   meeting_url: string;
 }
 
+// Recall stores transcription credentials at the account level (set them at
+// https://us-west-2.recall.ai/dashboard/transcription). We just toggle which
+// provider to use here. Set DEEPGRAM_API_KEY in env as a boolean-like flag —
+// the actual key lives in your Recall account.
 function transcriptionProvider() {
-  const dg = process.env.DEEPGRAM_API_KEY;
-  if (dg) {
-    return { deepgram_streaming: { deepgram_api_key: dg } };
+  if (process.env.DEEPGRAM_API_KEY) {
+    return { deepgram_streaming: {} };
   }
   return { meeting_captions: {} };
 }
@@ -41,7 +44,7 @@ export async function createBot(input: CreateBotInput): Promise<CreateBotRespons
         {
           type: "webhook",
           url: input.webhookUrl,
-          events: ["transcript.data", "bot.status_change"],
+          events: ["transcript.data"],
         },
       ],
     },

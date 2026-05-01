@@ -7,6 +7,11 @@ import {
   extractPostHogUrls,
   type FollowupQuestion,
 } from "@/lib/anthropic";
+import {
+  getBot,
+  getTranscriptLines,
+  extractParticipants,
+} from "@/lib/recall";
 
 // Full pipeline: identify questions in transcript -> answer each via PostHog
 // MCP -> compose a follow-up email draft. Saves everything back to the
@@ -17,20 +22,56 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  const meeting = await prisma.meeting.findUnique({ where: { id } });
+  let meeting = await prisma.meeting.findUnique({ where: { id } });
   if (!meeting) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
-  if (!meeting.transcript || !meeting.transcript.trim()) {
-    return NextResponse.json(
-      { error: "transcript not available yet" },
-      { status: 400 },
-    );
   }
   const conn = await prisma.connection.findUnique({ where: { id: "default" } });
   if (!conn) {
     return NextResponse.json(
       { error: "PostHog not connected" },
+      { status: 400 },
+    );
+  }
+
+  // Step 0: fetch the canonical transcript + participants from Recall on
+  // demand. We do this regardless of bot status — Recall returns whatever
+  // transcript exists so far. If we already have one, refresh it anyway in
+  // case more was captured since.
+  try {
+    const [bot, lines] = await Promise.all([
+      getBot(meeting.recallBotId).catch(() => null),
+      getTranscriptLines(meeting.recallBotId).catch(() => []),
+    ]);
+    const formatted = lines.map((l) => `${l.speaker ?? "?"}: ${l.text}`).join("\n");
+
+    const participantsList = bot ? extractParticipants(bot) : [];
+    if (participantsList.length === 0) {
+      const seen = new Set<string>();
+      for (const l of lines) {
+        if (l.speaker && !seen.has(l.speaker)) {
+          seen.add(l.speaker);
+          participantsList.push({ name: l.speaker });
+        }
+      }
+    }
+
+    if (formatted) {
+      meeting = await prisma.meeting.update({
+        where: { id },
+        data: {
+          transcript: formatted,
+          participants: JSON.stringify(participantsList),
+        },
+      });
+    }
+  } catch (err) {
+    console.error("[followup] fetching transcript from Recall failed:", err);
+  }
+
+  if (!meeting.transcript || !meeting.transcript.trim()) {
+    return NextResponse.json(
+      { error: "no transcript yet — has anyone spoken in the call?" },
       { status: 400 },
     );
   }

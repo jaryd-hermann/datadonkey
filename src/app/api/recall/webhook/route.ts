@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { askPostHog } from "@/lib/anthropic";
-import {
-  sendChatMessage,
-  getBot,
-  getTranscriptLines,
-  extractParticipants,
-} from "@/lib/recall";
+import { sendChatMessage } from "@/lib/recall";
 import { detectWakeWord } from "@/lib/wakeword";
 import { appendUtterance, debounce, shouldThrottle } from "@/lib/transcripts";
 
@@ -53,14 +48,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  if (event === "bot.status_change") {
-    handleStatusChange(botId, payload);
-    return NextResponse.json({ ok: true });
-  }
-
   if (event !== "transcript.data") {
     console.log(`[webhook] ${event} bot=${botId}`);
     return NextResponse.json({ ok: true });
+  }
+
+  // First time we see any transcript chunk for this bot, send the welcome
+  // message. (Recall's bot.status_change events aren't allowed on realtime
+  // endpoints, so this is the cheapest reliable trigger.)
+  if (!WELCOMED.has(botId)) {
+    WELCOMED.add(botId);
+    void sendChatMessage(botId, WELCOME_MSG);
+    console.log(`[webhook] bot=${botId} welcomed`);
   }
 
   // Final transcript chunk
@@ -96,85 +95,6 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({ ok: true });
-}
-
-function handleStatusChange(botId: string, payload: RecallEvent) {
-  // The status code can land under data.status.code or data.code depending on
-  // the Recall payload version; try both.
-  const code =
-    payload.data?.status?.code ??
-    (typeof payload.data?.code === "string" ? (payload.data.code as string) : undefined);
-  console.log(`[status] bot=${botId} code=${code}`);
-
-  if (!code) return;
-
-  void prisma.meeting
-    .update({ where: { recallBotId: botId }, data: { status: code } })
-    .catch(() => {});
-
-  // Send the welcome message the first time the bot is fully in the call.
-  const inCall = code === "in_call_recording" || code === "in_call_not_recording";
-  if (inCall && !WELCOMED.has(botId)) {
-    WELCOMED.add(botId);
-    void sendChatMessage(botId, WELCOME_MSG);
-    console.log(`[status] bot=${botId} welcomed`);
-  }
-
-  // Fetch + persist the canonical transcript when the bot wraps up.
-  if (code === "done" || code === "call_ended") {
-    void persistFinalTranscript(botId);
-  }
-}
-
-async function persistFinalTranscript(botId: string) {
-  try {
-    const [bot, lines] = await Promise.all([
-      getBot(botId).catch((err) => {
-        console.error(`[final] getBot failed:`, err);
-        return null;
-      }),
-      getTranscriptLines(botId).catch((err) => {
-        console.error(`[final] getTranscriptLines failed:`, err);
-        return [];
-      }),
-    ]);
-
-    const participants = bot ? extractParticipants(bot) : [];
-    const formatted = lines
-      .map((l) => `${l.speaker ?? "?"}: ${l.text}`)
-      .join("\n");
-
-    // Fall back to inferring participants from the transcript if Recall didn't
-    // give us a list (common when the bot was dispatched ad-hoc with no
-    // calendar event).
-    if (participants.length === 0) {
-      const seen = new Set<string>();
-      for (const l of lines) {
-        if (l.speaker && !seen.has(l.speaker)) {
-          seen.add(l.speaker);
-          participants.push({ name: l.speaker });
-        }
-      }
-    }
-
-    const title =
-      (bot as Record<string, unknown> | null)?.["meeting_metadata"] != null
-        ? ((bot as Record<string, unknown>).meeting_metadata as Record<string, unknown>)?.title as string | undefined
-        : undefined;
-
-    await prisma.meeting.update({
-      where: { recallBotId: botId },
-      data: {
-        endedAt: new Date(),
-        transcript: formatted,
-        participants: JSON.stringify(participants),
-        title: title ?? null,
-      },
-    });
-    console.log(`[final] bot=${botId} transcript=${formatted.length}b participants=${participants.length}`);
-  } catch (err) {
-    console.error(`[final] persistFinalTranscript failed:`, err);
-  }
 }
 
 async function handleQuestion(botId: string, question: string, speaker: string | null) {
