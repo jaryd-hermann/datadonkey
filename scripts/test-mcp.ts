@@ -1,4 +1,5 @@
-import { askPostHog } from "../src/lib/anthropic";
+import { askDataTool } from "../src/lib/anthropic";
+import { PROVIDERS } from "../src/lib/providers";
 
 async function main() {
   const apiKey = process.env.POSTHOG_PERSONAL_API_KEY;
@@ -14,7 +15,11 @@ async function main() {
 
   console.log(`> ${question}\n`);
   const t0 = Date.now();
-  const result = await askPostHog(question, apiKey, projectId, host);
+  const result = await askDataTool(question, PROVIDERS.posthog, {
+    apiKey,
+    projectId,
+    host,
+  });
   const ms = Date.now() - t0;
 
   console.log("--- ANSWER ---");

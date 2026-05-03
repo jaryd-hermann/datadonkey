@@ -52,3 +52,27 @@ export function shouldThrottle(botId: string): boolean {
   RECENT_TRIGGERS.set(botId, now);
   return false;
 }
+
+// "Armed" state: when we hear "Hey PostHog" with no follow-up question in
+// the same utterance, we arm the bot for a few seconds and treat the next
+// utterance as the question.
+const ARMED = new Map<string, number>();
+const ARMED_WINDOW_MS = 12_000;
+
+export function arm(botId: string): void {
+  ARMED.set(botId, Date.now() + ARMED_WINDOW_MS);
+}
+
+export function isArmed(botId: string): boolean {
+  const exp = ARMED.get(botId);
+  if (!exp) return false;
+  if (Date.now() >= exp) {
+    ARMED.delete(botId);
+    return false;
+  }
+  return true;
+}
+
+export function disarm(botId: string): void {
+  ARMED.delete(botId);
+}

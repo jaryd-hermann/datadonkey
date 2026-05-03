@@ -2,16 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
   analyzeTranscript,
-  askPostHog,
+  askDataTool,
   composeFollowupEmail,
   extractPostHogUrls,
   type FollowupQuestion,
 } from "@/lib/anthropic";
-import {
-  getBot,
-  getTranscriptLines,
-  extractParticipants,
-} from "@/lib/recall";
+import { readConnection } from "@/lib/connection";
 
 // Full pipeline: identify questions in transcript -> answer each via PostHog
 // MCP -> compose a follow-up email draft. Saves everything back to the
@@ -22,53 +18,17 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  let meeting = await prisma.meeting.findUnique({ where: { id } });
+  const meeting = await prisma.meeting.findUnique({ where: { id } });
   if (!meeting) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const conn = await prisma.connection.findUnique({ where: { id: "default" } });
-  if (!conn) {
+  const conn = await readConnection();
+  if (!conn.connected) {
     return NextResponse.json(
-      { error: "PostHog not connected" },
+      { error: "Data tool not connected" },
       { status: 400 },
     );
   }
-
-  // Step 0: fetch the canonical transcript + participants from Recall on
-  // demand. We do this regardless of bot status — Recall returns whatever
-  // transcript exists so far. If we already have one, refresh it anyway in
-  // case more was captured since.
-  try {
-    const [bot, lines] = await Promise.all([
-      getBot(meeting.recallBotId).catch(() => null),
-      getTranscriptLines(meeting.recallBotId).catch(() => []),
-    ]);
-    const formatted = lines.map((l) => `${l.speaker ?? "?"}: ${l.text}`).join("\n");
-
-    const participantsList = bot ? extractParticipants(bot) : [];
-    if (participantsList.length === 0) {
-      const seen = new Set<string>();
-      for (const l of lines) {
-        if (l.speaker && !seen.has(l.speaker)) {
-          seen.add(l.speaker);
-          participantsList.push({ name: l.speaker });
-        }
-      }
-    }
-
-    if (formatted) {
-      meeting = await prisma.meeting.update({
-        where: { id },
-        data: {
-          transcript: formatted,
-          participants: JSON.stringify(participantsList),
-        },
-      });
-    }
-  } catch (err) {
-    console.error("[followup] fetching transcript from Recall failed:", err);
-  }
-
   if (!meeting.transcript || !meeting.transcript.trim()) {
     return NextResponse.json(
       { error: "no transcript yet — has anyone spoken in the call?" },
@@ -94,15 +54,14 @@ export async function POST(
     return NextResponse.json({ followups: [], emailSubject: null, emailDraft: null });
   }
 
-  // Step 2: answer each question via PostHog MCP, in parallel.
+  // Step 2: answer each question via the connected tool's MCP, in parallel.
   const answered: FollowupQuestion[] = await Promise.all(
     identified.map(async (q) => {
       try {
-        const result = await askPostHog(
+        const result = await askDataTool(
           q.question,
-          conn.posthogApiKey,
-          conn.posthogProjectId,
-          conn.posthogHost,
+          conn.provider,
+          conn.credentials,
         );
         return {
           question: q.question,
@@ -111,11 +70,11 @@ export async function POST(
           posthogUrls: extractPostHogUrls(result.answer),
         };
       } catch (err) {
-        console.error("[followup] askPostHog failed:", err);
+        console.error("[followup] askDataTool failed:", err);
         return {
           question: q.question,
           reasoning: q.reasoning,
-          answer: "(PostHog query failed)",
+          answer: `(${conn.provider.name} query failed)`,
           posthogUrls: [],
         };
       }

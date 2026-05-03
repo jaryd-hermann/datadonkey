@@ -1,162 +1,167 @@
-"use client";
+import Link from "next/link";
 
-import { useEffect, useState } from "react";
+export default function Landing() {
+  return (
+    <div className="min-h-dvh bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+      <header className="mx-auto flex max-w-3xl items-center justify-between px-6 pt-10">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">🫏</span>
+          <span className="text-lg font-semibold tracking-tight">datadonkey</span>
+        </div>
+        <nav className="flex items-center gap-5 text-sm text-stone-600 dark:text-stone-400">
+          <Link href="/login" className="hover:text-stone-900 dark:hover:text-stone-100">
+            Sign in
+          </Link>
+          <Link
+            href="/signup"
+            className="rounded-md bg-stone-900 px-3 py-1.5 text-sm font-medium text-stone-50 hover:bg-stone-800 dark:bg-stone-50 dark:text-stone-900 dark:hover:bg-stone-200"
+          >
+            Get started
+          </Link>
+        </nav>
+      </header>
 
-interface PostHogStatus {
-  connected: boolean;
-  projectId?: string;
-  host?: string;
+      <main className="mx-auto max-w-3xl px-6 py-20">
+        <p className="text-sm uppercase tracking-widest text-stone-500">
+          A letter from a product manager
+        </p>
+        <h1 className="mt-4 text-4xl font-semibold leading-tight tracking-tight md:text-5xl">
+          Your data shouldn&apos;t have to wait for the next sync.
+        </h1>
+
+        <div className="mt-10 space-y-6 text-lg leading-relaxed text-stone-700 dark:text-stone-300">
+          <p>Hey,</p>
+          <p>
+            I&apos;m a PM. I spend my whole day on calls. Customer calls,
+            standups, design reviews, exec syncs. Every one of them surfaces a
+            data question I want answered — <em>right now</em>, not tomorrow,
+            not when I get back to my desk and remember it.
+          </p>
+          <p>
+            &ldquo;How many users churned this week?&rdquo;{" "}
+            &ldquo;What&apos;s converting on the new pricing page?&rdquo;{" "}
+            &ldquo;Where&apos;s the drop-off in onboarding?&rdquo;
+          </p>
+          <p>
+            By the time I open PostHog and the right insight, the moment is
+            gone. The decision got made on vibes. Or worse, deferred.
+          </p>
+          <p className="font-medium text-stone-900 dark:text-stone-100">
+            So I built datadonkey.
+          </p>
+        </div>
+
+        <Section title="The problem">
+          <p>
+            Product managers — especially the ones who actually look at data —
+            live in calls. The data they need lives in PostHog, Mixpanel,
+            Amplitude. The two never meet in the moment that matters.
+          </p>
+          <p>
+            You either prep every meeting with five custom queries (you
+            won&apos;t), context-switch mid-call (you can&apos;t), or just
+            guess (we all do).
+          </p>
+        </Section>
+
+        <Section title="The solution">
+          <p>
+            datadonkey is your data analyst on every conference call. Say{" "}
+            <Code>Hey PostHog</Code> mid-meeting and a chat reply lands in 5–10
+            seconds with the actual number. After the call it reads the
+            transcript, finds the data questions you missed, and emails you
+            and the participants the answers — with chart links.
+          </p>
+          <p>
+            Your data stays in the tool you already trust. We&apos;re just the
+            rail behind the scenes.
+          </p>
+        </Section>
+
+        <Section title="How it works">
+          <ol className="space-y-4 pl-0">
+            <Step n={1} title="Pick your data tool">
+              PostHog today. Mixpanel and Amplitude as their MCPs ship.
+            </Step>
+            <Step n={2} title="Drop in your call link">
+              Paste a Google Meet, Zoom, or Teams URL. The bot joins as
+              &ldquo;PostHog&rdquo; (or whatever tool you picked).
+            </Step>
+            <Step n={3} title="Talk normally">
+              Anyone on the call can say{" "}
+              <Code>Hey PostHog, &lt;question&gt;</Code>. The answer arrives
+              in chat seconds later — no app-switching, no presenter mode.
+            </Step>
+            <Step n={4} title="Get the post-call email">
+              datadonkey reads the full transcript, surfaces every data
+              question that came up, queries the tool, and emails everyone a
+              brief: TL;DR, findings with links, what to do next.
+            </Step>
+          </ol>
+        </Section>
+
+        <Section title="The ask">
+          <p>
+            Free for the first 10 design partners while we shape the product
+            with real teams. Pricing: TBD, and probably absurd value for
+            anyone running data-driven products.
+          </p>
+          <p>
+            If your team lives in calls and your data lives in PostHog,
+            Mixpanel, or Amplitude — give it a try.
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/signup"
+              className="inline-flex items-center gap-2 rounded-md bg-stone-900 px-5 py-3 text-sm font-medium text-stone-50 hover:bg-stone-800 dark:bg-stone-50 dark:text-stone-900 dark:hover:bg-stone-200"
+            >
+              Become a design partner →
+            </Link>
+            <p className="mt-3 text-sm text-stone-500">
+              Takes about a minute. No credit card.
+            </p>
+          </div>
+        </Section>
+
+        <p className="mt-20 text-sm text-stone-500">
+          — Jaryd, building datadonkey
+        </p>
+      </main>
+    </div>
+  );
 }
 
-export default function Home() {
-  const [status, setStatus] = useState<PostHogStatus | null>(null);
-  const [apiKey, setApiKey] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [host, setHost] = useState("https://us.posthog.com");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function load() {
-    const r = await fetch("/api/posthog");
-    setStatus(await r.json());
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    const r = await fetch("/api/posthog", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey, projectId, host }),
-    });
-    const j = await r.json();
-    setBusy(false);
-    if (!r.ok) {
-      setError(j.error ?? "Failed");
-      return;
-    }
-    setApiKey("");
-    await load();
-  }
-
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="min-h-dvh bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
-      <div className="mx-auto max-w-2xl">
-        <h1 className="text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-          PostHog Calls
-        </h1>
-        <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-          A bot that joins your calls and answers PostHog questions when someone says
-          {' '}<code className="rounded bg-zinc-200 px-1.5 py-0.5 font-mono text-sm dark:bg-zinc-800">Hey PostHog</code>.
-        </p>
-
-        <section className="mt-10 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-100">
-              1. Connect PostHog
-            </h2>
-            {status?.connected ? (
-              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-                Connected · project {status.projectId}
-              </span>
-            ) : (
-              <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                Not connected
-              </span>
-            )}
-          </div>
-
-          <form onSubmit={submit} className="mt-6 grid gap-4">
-            <label className="grid gap-1.5">
-              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Personal API Key
-              </span>
-              <input
-                type="password"
-                placeholder="phx_…"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-                required
-              />
-              <span className="text-xs text-zinc-500">
-                Generate at{" "}
-                <a
-                  href="https://us.posthog.com/settings/user-api-keys"
-                  target="_blank"
-                  className="underline"
-                >
-                  posthog.com → settings → personal API keys
-                </a>
-                . Needs read scopes for query, insight, dashboard, feature_flag, experiment, action, cohort, error_tracking, session_recording.
-              </span>
-            </label>
-
-            <div className="grid grid-cols-3 gap-4">
-              <label className="col-span-1 grid gap-1.5">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Project ID
-                </span>
-                <input
-                  type="text"
-                  placeholder="361026"
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                  className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-                  required
-                />
-              </label>
-              <label className="col-span-2 grid gap-1.5">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Host
-                </span>
-                <input
-                  type="text"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-                />
-              </label>
-            </div>
-
-            {error && (
-              <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={busy}
-              className="justify-self-start rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-            >
-              {busy ? "Validating…" : status?.connected ? "Update connection" : "Connect"}
-            </button>
-          </form>
-        </section>
-
-        {status?.connected && (
-          <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-100">
-              2. Send the bot to a call
-            </h2>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Head to the dashboard to paste a Google Meet, Zoom, or Teams URL.
-            </p>
-            <a
-              href="/dashboard"
-              className="mt-4 inline-block rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-            >
-              Open dashboard →
-            </a>
-          </section>
-        )}
+    <section className="mt-16">
+      <h2 className="text-sm font-semibold uppercase tracking-widest text-stone-500">
+        {title}
+      </h2>
+      <div className="mt-4 space-y-4 text-lg leading-relaxed text-stone-700 dark:text-stone-300">
+        {children}
       </div>
-    </div>
+    </section>
+  );
+}
+
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-4">
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-900 text-sm font-medium text-stone-50 dark:bg-stone-100 dark:text-stone-900">
+        {n}
+      </span>
+      <div>
+        <div className="font-medium text-stone-900 dark:text-stone-100">{title}</div>
+        <div className="mt-1 text-stone-600 dark:text-stone-400">{children}</div>
+      </div>
+    </li>
+  );
+}
+
+function Code({ children }: { children: React.ReactNode }) {
+  return (
+    <code className="rounded bg-stone-200 px-1.5 py-0.5 font-mono text-[0.95em] text-stone-900 dark:bg-stone-800 dark:text-stone-100">
+      {children}
+    </code>
   );
 }

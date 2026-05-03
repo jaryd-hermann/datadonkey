@@ -1,9 +1,11 @@
 -- CreateTable
 CREATE TABLE "Connection" (
     "id" TEXT NOT NULL PRIMARY KEY DEFAULT 'default',
-    "posthogApiKey" TEXT NOT NULL,
-    "posthogProjectId" TEXT NOT NULL,
-    "posthogHost" TEXT NOT NULL DEFAULT 'https://us.posthog.com',
+    "userName" TEXT,
+    "userCompany" TEXT,
+    "userEmail" TEXT,
+    "provider" TEXT NOT NULL DEFAULT 'posthog',
+    "credentials" TEXT,
     "updatedAt" DATETIME NOT NULL
 );
 
@@ -12,9 +14,17 @@ CREATE TABLE "Meeting" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "recallBotId" TEXT NOT NULL,
     "meetingUrl" TEXT NOT NULL,
+    "title" TEXT,
     "status" TEXT NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "endedAt" DATETIME
+    "endedAt" DATETIME,
+    "participants" TEXT,
+    "transcript" TEXT,
+    "followups" TEXT,
+    "followupsAt" DATETIME,
+    "emailSubject" TEXT,
+    "emailDraft" TEXT,
+    "emailDraftAt" DATETIME
 );
 
 -- CreateTable

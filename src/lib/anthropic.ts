@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { Credentials } from "./connection";
+import type { ProviderConfig } from "./providers";
 
 // Bypass any local proxy (e.g. PostHog Code's ANTHROPIC_BASE_URL) so we can
 // reach api.anthropic.com directly. The MCP server is only supported by the
@@ -9,11 +11,10 @@ const anthropic = new Anthropic({
   baseURL: "https://api.anthropic.com",
 });
 
-// Limit tools at the MCP server level via the ?tools= query param.
-// PostHog's MCP returns ~206k tokens of tool definitions otherwise — exceeds
-// the model context window. This is the source of truth for which tools the
-// bot can call.
-const ALLOWED_TOOLS = [
+// PostHog's MCP returns ~206k tokens of tool definitions if you don't filter,
+// which blows the model context window. We scope to a read-only subset via
+// the ?tools= query param at the MCP URL level.
+const POSTHOG_ALLOWED_TOOLS = [
   "query-trends",
   "query-funnel",
   "query-retention",
@@ -35,7 +36,20 @@ const ALLOWED_TOOLS = [
   "docs-search",
 ];
 
-const POSTHOG_MCP_URL = `https://mcp.posthog.com/mcp?tools=${ALLOWED_TOOLS.join(",")}`;
+function buildMcpServerConfig(provider: ProviderConfig, credentials: Credentials) {
+  if (!provider.available || !provider.mcpUrl) return null;
+  if (provider.id === "posthog") {
+    if (!credentials.apiKey) return null;
+    return {
+      type: "url" as const,
+      name: "posthog",
+      url: `${provider.mcpUrl}?tools=${POSTHOG_ALLOWED_TOOLS.join(",")}`,
+      authorization_token: credentials.apiKey,
+    };
+  }
+  // No public MCP for other providers yet.
+  return null;
+}
 
 export interface AskPostHogResult {
   answer: string;
@@ -44,25 +58,60 @@ export interface AskPostHogResult {
   raw: unknown;
 }
 
-export async function askPostHog(
+interface PriorTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export async function askDataTool(
   question: string,
-  apiKey: string,
-  projectId: string,
-  host = "https://us.posthog.com",
+  provider: ProviderConfig,
+  credentials: Credentials,
+  history: PriorTurn[] = [],
 ): Promise<AskPostHogResult> {
+  if (!provider.available) {
+    return {
+      answer: `${provider.name} live Q&A isn't available yet — its MCP server hasn't shipped. Your credentials are saved; we'll turn this on the moment it's available.`,
+      toolCalls: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      raw: null,
+    };
+  }
+  const mcpServer = buildMcpServerConfig(provider, credentials);
+  if (!mcpServer) {
+    return {
+      answer: `Couldn't reach ${provider.name} — credentials missing or invalid.`,
+      toolCalls: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      raw: null,
+    };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const projectId = credentials.projectId ?? "(unknown)";
+  const host = credentials.host ?? "";
+  const messages: PriorTurn[] = [
+    ...history,
+    { role: "user", content: question },
+  ];
+
   const res = await anthropic.beta.messages.create({
     model: "claude-opus-4-5",
     max_tokens: 1024,
-    system: `You answer PostHog analytics questions concisely (under 3 sentences) for live conversational use. Use the PostHog MCP tools. The PostHog project ID is ${projectId} and host is ${host}. If the question is not analytics-related, reply "not a PostHog question".`,
-    messages: [{ role: "user", content: question }],
-    mcp_servers: [
-      {
-        type: "url",
-        url: POSTHOG_MCP_URL,
-        name: "posthog",
-        authorization_token: apiKey,
-      },
-    ],
+    system: `You are a senior data analyst answering questions for a busy product manager during a live meeting. They want ANSWERS, not questions back. Their data tool is ${provider.name}.
+
+Hard rules:
+- Never ask the user clarifying questions about their data setup. Figure it out.
+- ALWAYS try to answer. When you don't know which event tracks something, use execute-sql to explore: list distinct event names from the events table (e.g. SELECT DISTINCT event FROM events WHERE timestamp > now() - INTERVAL 30 DAY ORDER BY count() DESC LIMIT 50), find the events whose name is most plausibly related to the question (e.g. "signup" matches "user_signed_up", "signup_completed", "$signup"), then run the actual query against that event. Only use docs-search as a last resort.
+- Lead with the number. Then a short, plain-English sentence. Then "(via event '<name>')" so the PM knows which event you used.
+- Be concise: 3 sentences or fewer. This is a live meeting chat.
+- If a follow-up question references "that" or "those" or "the X you mentioned", use the conversation history to resolve it.
+- If after exploring you genuinely cannot find a relevant event, say so plainly with what you tried — don't ask the PM to specify.
+
+Project ID: ${projectId}.${host ? ` Host: ${host}.` : ""} Today: ${today}.
+Region/timezone: assume the project's local time matches the data.`,
+    messages,
+    mcp_servers: [mcpServer],
     betas: ["mcp-client-2025-04-04"],
   });
 

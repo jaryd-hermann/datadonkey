@@ -89,6 +89,9 @@ export default function MeetingDetail({
   const transcriptReady = !!meeting.transcript && meeting.transcript.length > 0;
   const ranOnce = !!meeting.followupsAt;
   const noQuestions = ranOnce && meeting.followups.length === 0;
+  // Generate fetches the latest transcript from Recall on demand, so it works
+  // even before we have a local copy.
+  const canGenerate = !running;
 
   return (
     <div className="min-h-dvh bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
@@ -148,21 +151,21 @@ export default function MeetingDetail({
                 Generate follow-up
               </h2>
               <p className="mt-1 text-xs text-zinc-500">
-                Identifies data questions in the transcript, queries PostHog for each,
+                Identifies data questions in the transcript, queries your data tool for each,
                 and drafts a follow-up email. Takes ~30–60s.
               </p>
             </div>
             <button
               onClick={generate}
-              disabled={running || !transcriptReady}
+              disabled={!canGenerate}
               className="shrink-0 rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
             >
               {running ? "Working…" : ranOnce ? "Re-generate" : "Generate"}
             </button>
           </div>
-          {!transcriptReady && (
+          {!transcriptReady && !running && (
             <div className="mt-4 rounded-md bg-zinc-50 px-3 py-3 text-xs text-zinc-500 dark:bg-zinc-950">
-              Waiting for the call to end and transcript to land (status: <code>done</code>).
+              We&apos;ll pull the transcript from Recall when you click Generate. Best to wait until the call has ended (or some has been spoken).
             </div>
           )}
           {error && (
@@ -175,7 +178,7 @@ export default function MeetingDetail({
         {/* 3. Questions (with answers when present) */}
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
-            Questions for PostHog
+            Data questions surfaced
           </h2>
           {!ranOnce && (
             <div className="mt-3 text-sm text-zinc-500">
@@ -268,7 +271,7 @@ export default function MeetingDetail({
             </pre>
           ) : (
             <div className="mt-2 text-sm text-zinc-500">
-              Will appear here after the call ends.
+              Click Generate to pull the latest transcript from Recall.
             </div>
           )}
         </section>

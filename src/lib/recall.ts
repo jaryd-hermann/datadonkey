@@ -24,9 +24,21 @@ export interface CreateBotResponse {
 // https://us-west-2.recall.ai/dashboard/transcription). We just toggle which
 // provider to use here. Set DEEPGRAM_API_KEY in env as a boolean-like flag —
 // the actual key lives in your Recall account.
+//
+// keyterm biases Deepgram toward branded words it would otherwise mis-hear
+// (e.g. "PostHog" -> "post hoc" without a hint). nova-3 is required for
+// keyterm support.
 function transcriptionProvider() {
   if (process.env.DEEPGRAM_API_KEY) {
-    return { deepgram_streaming: {} };
+    return {
+      deepgram_streaming: {
+        deepgram_options: {
+          model: "nova-3",
+          language: "en-US",
+          keyterm: ["PostHog"],
+        },
+      },
+    };
   }
   return { meeting_captions: {} };
 }
