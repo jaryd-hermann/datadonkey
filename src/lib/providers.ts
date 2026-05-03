@@ -16,6 +16,7 @@ export interface CredentialField {
   placeholder?: string;
   secret?: boolean;
   helpText?: string;
+  required?: boolean;
 }
 
 export interface ProviderConfig {
@@ -44,9 +45,11 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
         label: "Personal API Key",
         placeholder: "phx_…",
         secret: true,
-        helpText: "Generate at posthog.com → settings → personal API keys. Read scopes for query, insight, dashboard, feature_flag, experiment, action, cohort, error_tracking, session_recording.",
+        required: true,
+        helpText:
+          "Generate at posthog.com → settings → personal API keys. Read scopes for query, insight, dashboard, feature_flag, experiment, action, cohort, error_tracking, session_recording.",
       },
-      { key: "projectId", label: "Project ID", placeholder: "361026" },
+      { key: "projectId", label: "Project ID", placeholder: "361026", required: true },
       {
         key: "host",
         label: "Host",
@@ -59,36 +62,54 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
   mixpanel: {
     id: "mixpanel",
     name: "Mixpanel",
-    available: false,
-    hasOAuth: false,
+    available: true,
+    hasOAuth: true,
+    oauthLabel: "Continue with Mixpanel",
+    mcpUrl: "https://mcp.mixpanel.com/mcp",
     credentialFields: [
-      { key: "projectId", label: "Project ID", placeholder: "12345" },
       {
-        key: "serviceAccountName",
-        label: "Service Account Username",
-        placeholder: "datadonkey.<id>.mp-service-account",
+        key: "accessToken",
+        label: "Access Token",
+        secret: true,
+        required: true,
+        helpText:
+          "OAuth bearer token from Mixpanel. While we finish wiring up real OAuth, obtain one via Claude Desktop or another MCP-aware client and paste it here.",
       },
       {
-        key: "serviceAccountSecret",
-        label: "Service Account Secret",
-        secret: true,
+        key: "region",
+        label: "Region",
+        placeholder: "us",
+        helpText: "us / eu / in",
       },
     ],
     setupHint:
-      "Mixpanel doesn't ship an MCP server yet. We'll save your credentials and turn on live Q&A the moment it's available.",
+      "DataDonkey queries Mixpanel via the official MCP server (mcp.mixpanel.com).",
   },
   amplitude: {
     id: "amplitude",
     name: "Amplitude",
-    available: false,
-    hasOAuth: false,
+    available: true,
+    hasOAuth: true,
+    oauthLabel: "Continue with Amplitude",
+    mcpUrl: "https://mcp.amplitude.com/mcp",
     credentialFields: [
-      { key: "apiKey", label: "API Key", secret: true },
-      { key: "secretKey", label: "Secret Key", secret: true },
-      { key: "projectId", label: "Project ID", placeholder: "12345" },
+      {
+        key: "accessToken",
+        label: "Access Token",
+        secret: true,
+        required: true,
+        helpText:
+          "OAuth bearer token from Amplitude. While we finish wiring up real OAuth, obtain one via Claude Desktop or another MCP-aware client and paste it here.",
+      },
+      {
+        key: "region",
+        label: "Region",
+        placeholder: "us",
+        helpText: "us / eu",
+      },
     ],
     setupHint:
-      "Amplitude doesn't ship an MCP server yet. We'll save your credentials and turn on live Q&A the moment it's available.",
+      "DataDonkey queries Amplitude via the official MCP server (mcp.amplitude.com).",
   },
 };
 

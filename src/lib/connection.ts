@@ -5,12 +5,13 @@ import { getProvider, type ProviderConfig, type ProviderId } from "./providers";
 // permissive index signature so different providers can store their own keys
 // without changing the type.
 export interface Credentials {
+  // PostHog
   apiKey?: string;
   projectId?: string;
   host?: string;
-  serviceAccountName?: string;
-  serviceAccountSecret?: string;
-  secretKey?: string;
+  // Mixpanel + Amplitude (OAuth bearer)
+  accessToken?: string;
+  region?: string;
   [key: string]: string | undefined;
 }
 
@@ -50,11 +51,11 @@ export async function readConnection(): Promise<ConnectionView> {
   }
   const provider = getProvider(row.provider);
   const credentials = parseCredentials(row.credentials);
-  // "Connected" if every required credential field has a value.
+  // "Connected" if every credential field marked required has a value.
   const connected = provider.credentialFields
-    .filter((f) => !f.placeholder?.startsWith("https://")) // host has a default; don't require a paste
+    .filter((f) => f.required)
     .every((f) => {
-      const v = credentials[f.key as keyof Credentials];
+      const v = credentials[f.key];
       return typeof v === "string" && v.length > 0;
     });
   return {

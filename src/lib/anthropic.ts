@@ -38,6 +38,7 @@ const POSTHOG_ALLOWED_TOOLS = [
 
 function buildMcpServerConfig(provider: ProviderConfig, credentials: Credentials) {
   if (!provider.available || !provider.mcpUrl) return null;
+
   if (provider.id === "posthog") {
     if (!credentials.apiKey) return null;
     return {
@@ -47,7 +48,39 @@ function buildMcpServerConfig(provider: ProviderConfig, credentials: Credentials
       authorization_token: credentials.apiKey,
     };
   }
-  // No public MCP for other providers yet.
+
+  if (provider.id === "mixpanel") {
+    if (!credentials.accessToken) return null;
+    const region = (credentials.region ?? "us").toLowerCase();
+    const url =
+      region === "eu"
+        ? "https://mcp-eu.mixpanel.com/mcp"
+        : region === "in"
+          ? "https://mcp-in.mixpanel.com/mcp"
+          : "https://mcp.mixpanel.com/mcp";
+    return {
+      type: "url" as const,
+      name: "mixpanel",
+      url,
+      authorization_token: credentials.accessToken,
+    };
+  }
+
+  if (provider.id === "amplitude") {
+    if (!credentials.accessToken) return null;
+    const region = (credentials.region ?? "us").toLowerCase();
+    const url =
+      region === "eu"
+        ? "https://mcp.eu.amplitude.com/mcp"
+        : "https://mcp.amplitude.com/mcp";
+    return {
+      type: "url" as const,
+      name: "amplitude",
+      url,
+      authorization_token: credentials.accessToken,
+    };
+  }
+
   return null;
 }
 
