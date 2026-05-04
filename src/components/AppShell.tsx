@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "@/lib/theme";
+import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -121,12 +122,16 @@ function ProfileMenu({
               <div className="mt-1 truncate text-xs text-stone-500">{user.email}</div>
             )}
           </div>
-          <a
-            href="/"
-            className="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800"
+          <button
+            onClick={async () => {
+              const supabase = createSupabaseBrowserClient();
+              await supabase.auth.signOut();
+              window.location.href = "/";
+            }}
+            className="block w-full px-4 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800"
           >
             Sign out
-          </a>
+          </button>
         </div>
       )}
     </div>

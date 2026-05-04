@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { AppShell } from "@/components/AppShell";
+import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type StepId = "auth" | "tool" | "preferences" | "calendar" | "slack";
 
@@ -72,19 +73,25 @@ export default function Signup() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
 
-  // Hydrate provider config when tool changes (so we know the credential
-  // fields). Doesn't require backend if we encode the shape locally.
+  // On mount: if the user is already authed (e.g. they returned from
+  // Google OAuth or clicked an email magic link), skip past the auth step
+  // and go straight to whichever step is next based on saved progress.
   useEffect(() => {
-    fetch("/api/connection")
-      .then((r) => r.json())
-      .then((j) => {
-        // Set provider shape based on the most recent backend value when we
-        // first land on the tool step, not eagerly on mount, to avoid
-        // overriding the user's selection.
-        if (j.provider) setProvider(j.provider);
-      })
-      .catch(() => {});
+    (async () => {
+      const supabase = createSupabaseBrowserClient();
+      const { data: userData } = await supabase.auth.getUser();
+      const r = await fetch("/api/connection");
+      const j = await r.json();
+      if (j.provider) setProvider(j.provider);
+
+      if (userData.user && j.signedUp) {
+        // Authed + name/company saved — pick up wherever they left off.
+        if (j.connected) setStepIdx(2);
+        else setStepIdx(1);
+      }
+    })();
   }, []);
 
   // When tool changes, fetch its provider shape from server. We do this by
@@ -129,37 +136,66 @@ export default function Signup() {
 
   // ---- step submission handlers ----
 
-  async function submitAuth(method: string) {
+  async function submitAuth(method: "email" | "google") {
     setError(null);
     if (authMode === "signin") {
-      // Mock: anyone with an email goes to dashboard.
-      router.push("/dashboard");
+      router.push("/login");
       return;
     }
     if (!name.trim() || !company.trim()) {
       setError("Name and company are required");
       return;
     }
+    if (!email.trim()) {
+      setError("Email is required");
+      return;
+    }
+
     setBusy(true);
-    const r = await fetch("/api/connection", {
+    // Persist name/company so they survive the auth round-trip.
+    const persist = await fetch("/api/connection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         userName: name.trim(),
         userCompany: company.trim(),
-        userEmail: email.trim() || undefined,
+        userEmail: email.trim(),
         provider: tool,
       }),
     });
-    setBusy(false);
-    if (!r.ok) {
-      const j = await r.json();
+    if (!persist.ok) {
+      const j = await persist.json();
+      setBusy(false);
       setError(j.error ?? "Failed");
       return;
     }
-    console.log(`(mock) signed up via ${method}`);
-    await loadProviderForTool(tool);
-    go(1);
+
+    const supabase = createSupabaseBrowserClient();
+
+    if (method === "google") {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=/signup`,
+        },
+      });
+      setBusy(false);
+      if (error) setError(error.message);
+      return; // browser is redirected
+    }
+
+    const { error: emailError } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/signup`,
+      },
+    });
+    setBusy(false);
+    if (emailError) {
+      setError(emailError.message);
+      return;
+    }
+    setEmailSent(true);
   }
 
   async function submitTool(method?: string) {
@@ -277,6 +313,7 @@ export default function Signup() {
                     onContinue={submitAuth}
                     error={error}
                     busy={busy}
+                    emailSent={emailSent}
                   />
                 )}
                 {step === "tool" && (
@@ -399,34 +436,43 @@ function ProgressDots({ stepIdx }: { stepIdx: number }) {
 }
 
 function AuthStep(props: {
-  authMode: "signup" | "signin";
-  setAuthMode: (v: "signup" | "signin") => void;
   name: string;
   setName: (v: string) => void;
   company: string;
   setCompany: (v: string) => void;
   email: string;
   setEmail: (v: string) => void;
-  tool: ToolId;
-  onContinue: (method: string) => void;
+  onContinue: (method: "email" | "google") => void;
   error: string | null;
   busy: boolean;
+  emailSent: boolean;
+  // unused but accepted for back-compat during refactor
+  authMode?: unknown;
+  setAuthMode?: unknown;
+  tool?: unknown;
 }) {
-  const isSignup = props.authMode === "signup";
+  if (props.emailSent) {
+    return (
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">Check your inbox</h2>
+        <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
+          We sent a magic link to <strong>{props.email}</strong>. Click it and you&apos;ll come back here to finish setting up.
+        </p>
+        <div className="mt-6 rounded-md bg-stone-100 px-4 py-3 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-400">
+          You can close this tab — clicking the email link will reopen the wizard.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <h2 className="text-2xl font-semibold tracking-tight">
-        {isSignup ? "Create your account" : "Welcome back"}
-      </h2>
+      <h2 className="text-2xl font-semibold tracking-tight">Create your account</h2>
       <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
         Already have an account?{" "}
-        <button
-          type="button"
-          onClick={() => props.setAuthMode(isSignup ? "signin" : "signup")}
-          className="font-medium text-stone-900 underline dark:text-stone-100"
-        >
-          {isSignup ? "Sign in" : "Sign up"}
-        </button>
+        <a href="/login" className="font-medium text-stone-900 underline dark:text-stone-100">
+          Sign in
+        </a>
       </p>
 
       <form
@@ -436,30 +482,26 @@ function AuthStep(props: {
         }}
         className="mt-8 space-y-4"
       >
-        {isSignup && (
-          <>
-            <Field label="Name">
-              <Input
-                required
-                value={props.name}
-                onChange={(e) => props.setName(e.target.value)}
-                placeholder="Alex Rivera"
-              />
-            </Field>
-            <Field label="Company">
-              <Input
-                required
-                value={props.company}
-                onChange={(e) => props.setCompany(e.target.value)}
-                placeholder="Acme"
-              />
-            </Field>
-          </>
-        )}
+        <Field label="Name">
+          <Input
+            required
+            value={props.name}
+            onChange={(e) => props.setName(e.target.value)}
+            placeholder="Alex Rivera"
+          />
+        </Field>
+        <Field label="Company">
+          <Input
+            required
+            value={props.company}
+            onChange={(e) => props.setCompany(e.target.value)}
+            placeholder="Acme"
+          />
+        </Field>
         <Field label="Work email">
           <Input
             type="email"
-            required={!isSignup}
+            required
             value={props.email}
             onChange={(e) => props.setEmail(e.target.value)}
             placeholder="alex@acme.com"
@@ -469,7 +511,7 @@ function AuthStep(props: {
         {props.error && <ErrorBox>{props.error}</ErrorBox>}
 
         <PrimaryButton type="submit" disabled={props.busy}>
-          {props.busy ? "Continuing…" : isSignup ? "Continue with email" : "Sign in"}
+          {props.busy ? "Sending…" : "Send magic link"}
         </PrimaryButton>
 
         <div className="my-3 flex items-center gap-3">
@@ -478,7 +520,7 @@ function AuthStep(props: {
           <hr className="grow border-stone-200 dark:border-stone-800" />
         </div>
 
-        <SecondaryButton type="button" onClick={() => props.onContinue("google")}>
+        <SecondaryButton type="button" onClick={() => props.onContinue("google")} disabled={props.busy}>
           🔑 Continue with Google
         </SecondaryButton>
       </form>

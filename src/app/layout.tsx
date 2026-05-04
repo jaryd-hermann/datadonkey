@@ -18,12 +18,11 @@ export const metadata: Metadata = {
   description: "Your data analyst on every call.",
 };
 
-// Inline script so the theme is applied before first paint and we don't
-// flash a white screen for dark-mode users on hard reloads.
+// Default to light mode. Only switch to dark if the user has explicitly
+// chosen it via the toggle (which writes 'dark' to localStorage).
 const themeBootstrap = `
 try {
-  var t = localStorage.getItem('dd-theme');
-  if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+  if (localStorage.getItem('dd-theme') === 'dark') {
     document.documentElement.classList.add('dark');
   }
 } catch (e) {}
