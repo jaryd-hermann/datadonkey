@@ -111,7 +111,10 @@ export default function OnboardingConnect() {
                 className="mt-1.5 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
               />
               {f.helpText && (
-                <span className="mt-1.5 block text-xs text-stone-500">{f.helpText}</span>
+                <span
+                  className="mt-1.5 block text-xs text-stone-500"
+                  dangerouslySetInnerHTML={{ __html: f.helpText }}
+                />
               )}
             </label>
           ))}

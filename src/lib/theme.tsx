@@ -16,39 +16,28 @@ const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  // Default to "light" for SSR; on mount we sync from the DOM (which the
+  // bootstrap script in <head> has already set correctly).
   const [theme, setTheme] = useState<Theme>("light");
 
-  // Read from localStorage / OS pref on first mount.
   useEffect(() => {
-    let initial: Theme = "light";
+    const isDark = document.documentElement.classList.contains("dark");
+    setTheme(isDark ? "dark" : "light");
+  }, []);
+
+  // Always derive from the DOM at click time so the toggle is correct even
+  // if state and DOM disagree (e.g. immediately after hydration before our
+  // mount effect has run).
+  const toggle = useCallback(() => {
+    const isDark = document.documentElement.classList.contains("dark");
+    const next: Theme = isDark ? "light" : "dark";
+    document.documentElement.classList.toggle("dark", next === "dark");
     try {
-      const saved = localStorage.getItem("dd-theme") as Theme | null;
-      if (saved === "light" || saved === "dark") {
-        initial = saved;
-      } else if (
-        typeof window !== "undefined" &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches
-      ) {
-        initial = "dark";
-      }
+      localStorage.setItem("dd-theme", next);
     } catch {
       // ignore
     }
-    setTheme(initial);
-    document.documentElement.classList.toggle("dark", initial === "dark");
-  }, []);
-
-  const toggle = useCallback(() => {
-    setTheme((prev) => {
-      const next: Theme = prev === "light" ? "dark" : "light";
-      try {
-        localStorage.setItem("dd-theme", next);
-      } catch {
-        // ignore
-      }
-      document.documentElement.classList.toggle("dark", next === "dark");
-      return next;
-    });
+    setTheme(next);
   }, []);
 
   return (

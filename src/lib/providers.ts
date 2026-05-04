@@ -47,7 +47,7 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
         secret: true,
         required: true,
         helpText:
-          "Generate at posthog.com → settings → personal API keys. Read scopes for query, insight, dashboard, feature_flag, experiment, action, cohort, error_tracking, session_recording.",
+          'Generate at <a class="underline" href="https://us.posthog.com/settings/user-api-keys#personal-api-keys" target="_blank" rel="noreferrer">us.posthog.com → settings → personal API keys</a>. Read scopes for query, insight, dashboard, feature_flag, experiment, action, cohort, error_tracking, session_recording.',
       },
       { key: "projectId", label: "Project ID", placeholder: "361026", required: true },
       {

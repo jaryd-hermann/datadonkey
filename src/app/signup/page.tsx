@@ -562,7 +562,10 @@ function ToolStep(props: {
                       }
                     />
                     {f.helpText && (
-                      <p className="mt-1 text-xs text-stone-500">{f.helpText}</p>
+                      <p
+                        className="mt-1 text-xs text-stone-500"
+                        dangerouslySetInnerHTML={{ __html: f.helpText }}
+                      />
                     )}
                   </Field>
                 ))}
@@ -570,7 +573,9 @@ function ToolStep(props: {
 
               {props.error && <ErrorBox>{props.error}</ErrorBox>}
 
-              {props.provider.hasOAuth && props.provider.oauthLabel && (
+              {/* SSO only for PostHog — Mixpanel & Amplitude don't expose
+                  third-party OAuth that DataDonkey can register against. */}
+              {props.provider.id === "posthog" && props.provider.oauthLabel && (
                 <SecondaryButton
                   type="button"
                   onClick={props.onSso}
