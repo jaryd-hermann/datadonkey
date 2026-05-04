@@ -222,7 +222,7 @@ function MeetingsTab({
   return (
     <div>
       {/* Status indicator */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <motion.span
           className={`inline-flex h-2.5 w-2.5 rounded-full ${
             inCall ? "bg-emerald-500" : "bg-stone-300 dark:bg-stone-700"
@@ -233,10 +233,17 @@ function MeetingsTab({
         <span className="text-sm font-medium">
           {inCall ? "DataDonkey is in a call" : "DataDonkey is snoozing"}
         </span>
+        {!inCall && (
+          <span className="text-xs text-stone-500">
+            (invite to a meeting to wake!)
+          </span>
+        )}
         {active.length > 1 && (
           <span className="text-xs text-stone-500">+{active.length - 1} more dispatched</span>
         )}
       </div>
+
+      <HowItWorks providerName={conn.provider.name} />
 
       {/* Send-to-call form */}
       <form
@@ -244,15 +251,16 @@ function MeetingsTab({
         className="mt-6 rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900"
       >
         <label className="block">
-          <span className="text-sm font-medium">Invite DataDonkey to a meeting</span>
-          <span className="ml-2 text-xs text-stone-500">
-            Zoom · Microsoft Teams · Google Meet
-          </span>
-          <div className="mt-2 flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">Invite DataDonkey to a meeting</span>
+            <span className="text-xs text-stone-500">supports</span>
+            <PlatformIcons />
+          </div>
+          <div className="mt-3 flex gap-2">
             <div className="relative flex-1">
               <input
                 type="url"
-                placeholder="https://meet.google.com/abc-defg-hij  ·  https://zoom.us/j/123  ·  https://teams.microsoft.com/..."
+                placeholder="Paste a Google Meet, Microsoft Teams, or Zoom link…"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 pr-20 text-sm dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100"
@@ -322,6 +330,94 @@ function MeetingsTab({
         </div>
       </div>
     </div>
+  );
+}
+
+function HowItWorks({ providerName }: { providerName: string }) {
+  const steps: { color: string; rotate: string; title: string; body: string }[] = [
+    {
+      color: "bg-emerald-300",
+      rotate: "-rotate-3",
+      title: "Drop a link",
+      body: "Paste your Meet, Teams, or Zoom URL below.",
+    },
+    {
+      color: "bg-amber-300",
+      rotate: "rotate-2",
+      title: "Bot joins",
+      body: `Joins as "${providerName}" and posts a hello in chat.`,
+    },
+    {
+      color: "bg-rose-300",
+      rotate: "-rotate-2",
+      title: "Ask away",
+      body: `Anyone says "Hey ${providerName}, …" — answer lands in chat in seconds.`,
+    },
+    {
+      color: "bg-emerald-300",
+      rotate: "rotate-3",
+      title: "Get the follow-up",
+      body: "Email summary with the data questions you missed, after the call.",
+    },
+  ];
+  return (
+    <section className="mt-6 rounded-xl border border-stone-200 bg-amber-50/40 p-6 dark:border-stone-800 dark:bg-amber-950/10">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-stone-500">
+        How it works
+      </h3>
+      <ol className="relative mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {steps.map((s, i) => (
+          <li key={i} className="flex items-start gap-3">
+            <span
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${s.color} ${s.rotate} text-sm font-bold text-stone-900 shadow-sm`}
+            >
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <span className="pt-0.5">
+              <span className="block text-sm font-semibold text-stone-900 dark:text-stone-100">
+                {s.title}
+              </span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-stone-600 dark:text-stone-400">
+                {s.body}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function PlatformIcons() {
+  const icons: { src: string; alt: string; tooltip: string }[] = [
+    {
+      src: "https://cdn.simpleicons.org/googlemeet/00897B",
+      alt: "Google Meet",
+      tooltip: "Google Meet",
+    },
+    {
+      src: "https://cdn.simpleicons.org/microsoftteams/6264A7",
+      alt: "Microsoft Teams",
+      tooltip: "Microsoft Teams",
+    },
+    {
+      src: "https://cdn.simpleicons.org/zoom/2D8CFF",
+      alt: "Zoom",
+      tooltip: "Zoom",
+    },
+  ];
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {icons.map((i) => (
+        <img
+          key={i.alt}
+          src={i.src}
+          alt={i.alt}
+          title={i.tooltip}
+          className="h-4 w-4"
+        />
+      ))}
+    </span>
   );
 }
 

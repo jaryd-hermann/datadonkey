@@ -30,12 +30,17 @@ function Header({
 }) {
   return (
     <header className="border-b border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-800/60 dark:bg-stone-950/80">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-        <Link href={showAppNav ? "/dashboard" : "/"} className="flex items-center gap-2.5">
+      {/* 3-col grid so the wordmark stays centered regardless of how many
+          nav items appear on the right. */}
+      <div className="mx-auto grid max-w-6xl grid-cols-[1fr_auto_1fr] items-center px-6 py-3">
+        <div />
+        <Link
+          href={showAppNav ? "/dashboard" : "/"}
+          className="flex items-center justify-self-center"
+        >
           <Wordmark />
         </Link>
-
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2">
           {!showAppNav && (
             <>
               <Link
