@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
+import { AppShell } from "@/components/AppShell";
 
 interface Question {
   id: string;
@@ -80,9 +81,9 @@ export default function MeetingDetail({
 
   if (!meeting) {
     return (
-      <div className="min-h-dvh bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
-        <div className="mx-auto max-w-3xl text-zinc-500">Loading…</div>
-      </div>
+      <AppShell showAppNav>
+        <div className="mx-auto max-w-3xl px-6 py-16 text-zinc-500">Loading…</div>
+      </AppShell>
     );
   }
 
@@ -94,8 +95,8 @@ export default function MeetingDetail({
   const canGenerate = !running;
 
   return (
-    <div className="min-h-dvh bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
-      <div className="mx-auto max-w-3xl">
+    <AppShell showAppNav>
+      <div className="mx-auto max-w-3xl px-6 py-10">
         <div className="mb-6">
           <a
             href="/dashboard"
@@ -297,6 +298,6 @@ export default function MeetingDetail({
           </section>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

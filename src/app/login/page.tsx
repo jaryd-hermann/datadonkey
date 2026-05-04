@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { AppShell } from "@/components/AppShell";
 
 export default function Login() {
   const router = useRouter();
@@ -13,14 +14,9 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-dvh bg-stone-50 dark:bg-stone-950">
+    <AppShell>
       <div className="mx-auto max-w-md px-6 py-16">
-        <a href="/" className="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-900 dark:hover:text-stone-100">
-          <span>🫏</span>
-          <span>datadonkey</span>
-        </a>
-
-        <h1 className="mt-10 text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+        <h1 className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
           Welcome back.
         </h1>
 
@@ -76,6 +72,6 @@ export default function Login() {
           Mock auth for the prototype.
         </p>
       </div>
-    </div>
+    </AppShell>
   );
 }

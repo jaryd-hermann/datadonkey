@@ -17,13 +17,19 @@ export interface Credentials {
 
 export interface ConnectionView {
   exists: boolean;
-  signedUp: boolean; // has user submitted name/company/tool?
-  connected: boolean; // has user submitted credentials?
+  signedUp: boolean;
+  connected: boolean;
   userName: string | null;
   userCompany: string | null;
   userEmail: string | null;
   provider: ProviderConfig;
   credentials: Credentials;
+  prefLive: boolean;
+  prefFollowup: boolean;
+  calendarConnected: boolean;
+  calendarProvider: string | null;
+  slackConnected: boolean;
+  slackTeamName: string | null;
 }
 
 function parseCredentials(s: string | null): Credentials {
@@ -47,6 +53,12 @@ export async function readConnection(): Promise<ConnectionView> {
       userEmail: null,
       provider: getProvider("posthog"),
       credentials: {},
+      prefLive: true,
+      prefFollowup: true,
+      calendarConnected: false,
+      calendarProvider: null,
+      slackConnected: false,
+      slackTeamName: null,
     };
   }
   const provider = getProvider(row.provider);
@@ -67,6 +79,12 @@ export async function readConnection(): Promise<ConnectionView> {
     userEmail: row.userEmail,
     provider,
     credentials,
+    prefLive: row.prefLive,
+    prefFollowup: row.prefFollowup,
+    calendarConnected: row.calendarConnected,
+    calendarProvider: row.calendarProvider,
+    slackConnected: row.slackConnected,
+    slackTeamName: row.slackTeamName,
   };
 }
 

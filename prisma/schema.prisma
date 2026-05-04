@@ -22,6 +22,17 @@ model Connection {
   provider     String   @default("posthog")
   credentials  String?
 
+  // Preferences (at least one must be true to make sense of the product)
+  prefLive     Boolean  @default(true)
+  prefFollowup Boolean  @default(true)
+
+  // Mocked OAuth state for prototype. Calendar/Slack toggles flip these to
+  // simulate "connected" until we wire up real OAuth.
+  calendarConnected Boolean  @default(false)
+  calendarProvider  String?  // "google" | "microsoft"
+  slackConnected    Boolean  @default(false)
+  slackTeamName     String?
+
   updatedAt    DateTime @updatedAt
 }
 

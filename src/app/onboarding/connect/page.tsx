@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AppShell } from "@/components/AppShell";
 
 interface CredentialField {
   key: string;
@@ -73,9 +74,9 @@ export default function OnboardingConnect() {
 
   if (!info) {
     return (
-      <div className="min-h-dvh bg-stone-50 px-6 py-16 text-stone-500 dark:bg-stone-950">
-        Loading…
-      </div>
+      <AppShell>
+        <div className="mx-auto max-w-md px-6 py-16 text-stone-500">Loading…</div>
+      </AppShell>
     );
   }
 
@@ -83,17 +84,9 @@ export default function OnboardingConnect() {
   const visibleFields = provider.credentialFields;
 
   return (
-    <div className="min-h-dvh bg-stone-50 dark:bg-stone-950">
+    <AppShell>
       <div className="mx-auto max-w-md px-6 py-16">
-        <a href="/" className="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-900 dark:hover:text-stone-100">
-          <span>🫏</span>
-          <span>datadonkey</span>
-        </a>
-
-        <p className="mt-10 text-sm uppercase tracking-widest text-stone-500">
-          Step 2 of 2
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+        <h1 className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
           Connect {provider.name}
         </h1>
         {provider.setupHint && (
@@ -146,6 +139,6 @@ export default function OnboardingConnect() {
           </button>
         </form>
       </div>
-    </div>
+    </AppShell>
   );
 }

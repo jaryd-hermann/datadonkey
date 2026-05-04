@@ -38,38 +38,65 @@ export async function POST(req: NextRequest) {
     data: { recallBotId: bot.id, meetingUrl, status: "joining" },
   });
 
-  // Fire-and-forget: poll bot status and send the welcome message the
-  // instant the bot is in-call. We can't subscribe to bot.status_change
-  // events on realtime_endpoints, so polling is the cheapest reliable way
-  // to make the welcome appear immediately on join.
-  void waitAndWelcome(bot.id, conn.provider.name);
+  // Fire-and-forget: poll bot status, send welcome on join, and keep
+  // updating Meeting.status as Recall reports state changes. Caps at 4
+  // hours so a stuck process doesn't hold a watcher forever.
+  void watchBot(bot.id, conn.provider.name);
 
   return NextResponse.json({ ok: true, meeting, bot });
 }
 
-async function waitAndWelcome(botId: string, providerName: string) {
-  const deadline = Date.now() + 90_000; // give up after 90s
+const TERMINAL_STATES = new Set(["done", "fatal", "call_ended"]);
+const IN_CALL_STATES = new Set(["in_call_recording", "in_call_not_recording"]);
+
+async function watchBot(botId: string, providerName: string) {
+  const deadline = Date.now() + 4 * 60 * 60 * 1000;
+  let lastSeen: string | null = null;
+
   while (Date.now() < deadline) {
-    if (isWelcomed(botId)) return; // webhook beat us to it
+    let latest: string | undefined;
     try {
       const b = (await getBot(botId)) as Record<string, unknown>;
       const changes = (b.status_changes as Array<{ code?: string }> | undefined) ?? [];
-      const latest = changes[changes.length - 1]?.code;
-      if (latest === "in_call_recording" || latest === "in_call_not_recording") {
-        if (!isWelcomed(botId)) {
-          markWelcomed(botId);
-          const msg =
-            `👋 Hi, I'm DataDonkey, your data analyst. Say "Hey ${providerName}, …" and I'll look up data for you.\n` +
-            `Try: "Hey ${providerName}, how many users this week?" or "what dashboards do we have?"`;
-          await sendChatMessage(botId, msg);
-        }
-        return;
-      }
-      if (latest === "fatal" || latest === "done") return;
+      latest = changes[changes.length - 1]?.code;
     } catch {
-      // ignore transient errors and keep polling
+      // transient — try again
     }
-    await new Promise((r) => setTimeout(r, 2_000));
+
+    if (latest && latest !== lastSeen) {
+      lastSeen = latest;
+      // Persist a friendly status onto the Meeting row so the dashboard
+      // can show "in a call" / "snoozing".
+      const friendly = IN_CALL_STATES.has(latest)
+        ? "in_call"
+        : TERMINAL_STATES.has(latest)
+          ? "done"
+          : latest;
+      try {
+        await prisma.meeting.update({
+          where: { recallBotId: botId },
+          data: {
+            status: friendly,
+            ...(TERMINAL_STATES.has(latest) ? { endedAt: new Date() } : {}),
+          },
+        });
+      } catch {
+        // ignore
+      }
+
+      // Welcome the moment we first see in-call.
+      if (IN_CALL_STATES.has(latest) && !isWelcomed(botId)) {
+        markWelcomed(botId);
+        const msg =
+          `👋 Hi, I'm DataDonkey, your data analyst. Say "Hey ${providerName}, …" and I'll look up data for you.\n` +
+          `Try: "Hey ${providerName}, how many users this week?" or "what dashboards do we have?"`;
+        await sendChatMessage(botId, msg);
+      }
+    }
+
+    if (latest && TERMINAL_STATES.has(latest)) return;
+
+    await new Promise((r) => setTimeout(r, 5_000));
   }
 }
 

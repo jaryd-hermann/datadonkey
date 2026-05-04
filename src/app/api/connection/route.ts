@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
 import { readConnection, saveCredentials, saveSignup } from "@/lib/connection";
 import { getProvider, type ProviderId } from "@/lib/providers";
 
@@ -21,7 +22,50 @@ export async function GET() {
       setupHint: conn.provider.setupHint,
     },
     credentials: redactCredentials(conn.credentials),
+    prefLive: conn.prefLive,
+    prefFollowup: conn.prefFollowup,
+    calendarConnected: conn.calendarConnected,
+    calendarProvider: conn.calendarProvider,
+    slackConnected: conn.slackConnected,
+    slackTeamName: conn.slackTeamName,
   });
+}
+
+// Partial update of preferences + mock OAuth state (calendar / slack).
+export async function PATCH(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const update: Record<string, string | boolean | null> = {};
+
+  if (typeof body.prefLive === "boolean") update.prefLive = body.prefLive;
+  if (typeof body.prefFollowup === "boolean") update.prefFollowup = body.prefFollowup;
+  if (typeof body.calendarConnected === "boolean") update.calendarConnected = body.calendarConnected;
+  if (typeof body.calendarProvider === "string" || body.calendarProvider === null) {
+    update.calendarProvider = body.calendarProvider;
+  }
+  if (typeof body.slackConnected === "boolean") update.slackConnected = body.slackConnected;
+  if (typeof body.slackTeamName === "string" || body.slackTeamName === null) {
+    update.slackTeamName = body.slackTeamName;
+  }
+
+  // Enforce: at least one preference must be enabled.
+  if (update.prefLive === false || update.prefFollowup === false) {
+    const cur = await prisma.connection.findUnique({ where: { id: "default" } });
+    const live = update.prefLive !== undefined ? Boolean(update.prefLive) : (cur?.prefLive ?? true);
+    const fu = update.prefFollowup !== undefined ? Boolean(update.prefFollowup) : (cur?.prefFollowup ?? true);
+    if (!live && !fu) {
+      return NextResponse.json(
+        { error: "At least one preference must be enabled" },
+        { status: 400 },
+      );
+    }
+  }
+
+  await prisma.connection.upsert({
+    where: { id: "default" },
+    create: { id: "default", ...update },
+    update,
+  });
+  return NextResponse.json({ ok: true });
 }
 
 // Mock signup: stores name/company/email/provider. No real auth.

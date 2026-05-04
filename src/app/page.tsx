@@ -1,27 +1,10 @@
 import Link from "next/link";
+import { AppShell } from "@/components/AppShell";
 
 export default function Landing() {
   return (
-    <div className="min-h-dvh bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-      <header className="mx-auto flex max-w-3xl items-center justify-between px-6 pt-10">
-        <div className="flex items-center gap-2">
-          <span className="text-2xl">🫏</span>
-          <span className="text-lg font-semibold tracking-tight">datadonkey</span>
-        </div>
-        <nav className="flex items-center gap-5 text-sm text-stone-600 dark:text-stone-400">
-          <Link href="/login" className="hover:text-stone-900 dark:hover:text-stone-100">
-            Sign in
-          </Link>
-          <Link
-            href="/signup"
-            className="rounded-md bg-stone-900 px-3 py-1.5 text-sm font-medium text-stone-50 hover:bg-stone-800 dark:bg-stone-50 dark:text-stone-900 dark:hover:bg-stone-200"
-          >
-            Get started
-          </Link>
-        </nav>
-      </header>
-
-      <main className="mx-auto max-w-3xl px-6 py-20">
+    <AppShell>
+      <div className="mx-auto max-w-3xl px-6 py-20">
         <p className="text-sm uppercase tracking-widest text-stone-500">
           A letter from a product manager
         </p>
@@ -126,8 +109,8 @@ export default function Landing() {
         <p className="mt-20 text-sm text-stone-500">
           — Jaryd, building datadonkey
         </p>
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
