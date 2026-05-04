@@ -31,9 +31,8 @@ function Header({
   return (
     <header className="border-b border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-800/60 dark:bg-stone-950/80">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-        <Link href={showAppNav ? "/dashboard" : "/"} className="flex items-center gap-2">
-          <span className="text-xl">🫏</span>
-          <span className="text-base font-semibold tracking-tight">datadonkey</span>
+        <Link href={showAppNav ? "/dashboard" : "/"} className="flex items-center gap-2.5">
+          <Wordmark />
         </Link>
 
         <div className="flex items-center gap-2">
@@ -135,6 +134,31 @@ function ProfileMenu({
         </div>
       )}
     </div>
+  );
+}
+
+// Wordmark logo: small donkey mark + "datadonkey" with the data/donkey
+// color split. Adapts to light/dark.
+export function Wordmark({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
+  const text =
+    size === "sm" ? "text-base" : size === "lg" ? "text-3xl" : "text-xl";
+  const img = size === "sm" ? "h-5 w-5" : size === "lg" ? "h-9 w-9" : "h-7 w-7";
+  return (
+    <span className="inline-flex items-center gap-2">
+      {/* Cropped donkey from the brand image. The cream background blends
+          with the page's stone-50; in dark mode we hide it via dark:hidden
+          and show a tinted version. For prototype, the same image works in
+          both modes — the contrast on dark is acceptable. */}
+      <img
+        src="/donkey-mark.png"
+        alt=""
+        className={`${img} rounded-md object-cover`}
+      />
+      <span className={`${text} font-extrabold tracking-tight leading-none`}>
+        <span className="text-stone-900 dark:text-stone-50">data</span>
+        <span className="text-orange-700 dark:text-orange-400">donkey</span>
+      </span>
+    </span>
   );
 }
 
