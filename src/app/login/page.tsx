@@ -66,7 +66,7 @@ export default function Login() {
                 disabled={busy}
                 className="flex items-center justify-center gap-2 rounded-md border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-900 hover:bg-stone-50 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
               >
-                <span>🔑</span>
+                <img src="https://www.google.com/favicon.ico" alt="" className="h-4 w-4" />
                 <span>Continue with Google</span>
               </button>
             </div>

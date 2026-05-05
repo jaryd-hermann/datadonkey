@@ -147,8 +147,8 @@ export default function Signup() {
       setError("Name and company are required");
       return;
     }
-    if (!email.trim()) {
-      setError("Email is required");
+    if (method === "email" && !email.trim()) {
+      setError("Email is required for the magic link");
       return;
     }
 
@@ -160,7 +160,7 @@ export default function Signup() {
       body: JSON.stringify({
         userName: name.trim(),
         userCompany: company.trim(),
-        userEmail: email.trim(),
+        userEmail: email.trim() || undefined,
         provider: tool,
       }),
     });
@@ -499,10 +499,27 @@ function AuthStep(props: {
             placeholder="Acme"
           />
         </Field>
+
+        <div className="my-5 flex items-center gap-3">
+          <hr className="grow border-stone-200 dark:border-stone-800" />
+          <span className="text-xs uppercase tracking-widest text-stone-400">then sign in with</span>
+          <hr className="grow border-stone-200 dark:border-stone-800" />
+        </div>
+
+        <SecondaryButton type="button" onClick={() => props.onContinue("google")} disabled={props.busy}>
+          <img src="https://www.google.com/favicon.ico" alt="" className="h-4 w-4" />
+          Continue with Google
+        </SecondaryButton>
+
+        <div className="my-3 flex items-center gap-3">
+          <hr className="grow border-stone-200 dark:border-stone-800" />
+          <span className="text-xs uppercase tracking-widest text-stone-400">or work email</span>
+          <hr className="grow border-stone-200 dark:border-stone-800" />
+        </div>
+
         <Field label="Work email">
           <Input
             type="email"
-            required
             value={props.email}
             onChange={(e) => props.setEmail(e.target.value)}
             placeholder="alex@acme.com"
@@ -514,17 +531,6 @@ function AuthStep(props: {
         <PrimaryButton type="submit" disabled={props.busy}>
           {props.busy ? "Sending…" : "Send magic link"}
         </PrimaryButton>
-
-        <div className="my-3 flex items-center gap-3">
-          <hr className="grow border-stone-200 dark:border-stone-800" />
-          <span className="text-xs uppercase tracking-widest text-stone-400">or</span>
-          <hr className="grow border-stone-200 dark:border-stone-800" />
-        </div>
-
-        <SecondaryButton type="button" onClick={() => props.onContinue("google")} disabled={props.busy}>
-          <img src="https://www.google.com/favicon.ico" alt="" className="h-4 w-4" />
-          Continue with Google
-        </SecondaryButton>
       </form>
     </div>
   );
