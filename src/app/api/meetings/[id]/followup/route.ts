@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import {
   analyzeTranscript,
   askDataToolStrategic,
-  composeFollowupEmail,
   extractPostHogUrls,
   type FollowupQuestion,
 } from "@/lib/anthropic";
@@ -58,35 +57,56 @@ export async function POST(
     return NextResponse.json({ followups: [], emailSubject: null, emailDraft: null });
   }
 
-  // Step 2: strategic-analyst answer per question, in parallel.
-  const answered: Array<FollowupQuestion & { mcpPrompt: string }> = await Promise.all(
-    identified.map(async (q) => {
-      try {
-        const result = await askDataToolStrategic(
-          q.question,
-          q.reasoning,
-          conn.provider,
-          conn.credentials,
-        );
-        return {
-          question: q.question,
-          reasoning: q.reasoning,
-          answer: result.answer || "(no response)",
-          posthogUrls: extractPostHogUrls(result.answer),
-          mcpPrompt: JSON.stringify(result.prompt),
-        };
-      } catch (err) {
-        console.error("[followup] askDataToolStrategic failed:", err);
-        return {
-          question: q.question,
-          reasoning: q.reasoning,
-          answer: `(${conn.provider.name} query failed)`,
-          posthogUrls: [],
-          mcpPrompt: "",
-        };
-      }
-    }),
-  );
+  // Step 2: strategic-analyst answer per question. Sequential (not parallel)
+  // for two reasons: (1) avoid Anthropic rate limits on concurrent
+  // mcp_servers calls, (2) Vercel Hobby caps function execution at 60s, so
+  // we'd rather get 1-2 great answers than time out 3 mediocre ones.
+  // Cap to the first 4 questions so we never run more than ~4*~12s = 48s.
+  const QUESTION_BUDGET = 4;
+  const queue = identified.slice(0, QUESTION_BUDGET);
+  const skipped = identified.slice(QUESTION_BUDGET);
+  const answered: Array<FollowupQuestion & { mcpPrompt: string }> = [];
+  for (const q of queue) {
+    const t0 = Date.now();
+    try {
+      const result = await askDataToolStrategic(
+        q.question,
+        q.reasoning,
+        conn.provider,
+        conn.credentials,
+      );
+      console.log(
+        `[followup] q="${q.question.slice(0, 60)}" ${Date.now() - t0}ms tools=${result.toolCalls.length} tok=${result.usage.outputTokens}`,
+      );
+      answered.push({
+        question: q.question,
+        reasoning: q.reasoning,
+        answer: result.answer || "(empty response from the model)",
+        posthogUrls: extractPostHogUrls(result.answer),
+        mcpPrompt: JSON.stringify(result.prompt),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[followup] askDataToolStrategic threw for "${q.question}":`, msg);
+      answered.push({
+        question: q.question,
+        reasoning: q.reasoning,
+        answer: `_Couldn't answer this one — ${conn.provider.name} query errored: ${msg.slice(0, 200)}_`,
+        posthogUrls: [],
+        mcpPrompt: "",
+      });
+    }
+  }
+  // Note skipped questions in the report rather than dropping them silently.
+  for (const s of skipped) {
+    answered.push({
+      question: s.question,
+      reasoning: s.reasoning,
+      answer: `_Skipped to keep the analysis under 60s — re-run "Generate" to answer this one._`,
+      posthogUrls: [],
+      mcpPrompt: "",
+    });
+  }
 
   // Persist a Question row per item — including the prompt sent (for evals).
   // Wipe previous to keep things clean if Generate is re-run.
@@ -111,23 +131,14 @@ export async function POST(
     } catch {}
   }
 
-  // Step 4: compose the email
-  const email = await composeFollowupEmail({
-    meetingTitle: meeting.title,
-    participants,
-    qa: answered.map((a) => ({
-      question: a.question,
-      reasoning: a.reasoning,
-      answer: a.answer ?? "",
-      posthogUrls: a.posthogUrls ?? [],
-    })),
-  });
-
-  // Build a richer markdown report combining the email + per-question answers
-  // with footnotes already inlined by the strategic analyst.
+  // Step 4: build the report markdown directly from the answers (each
+  // already has BLUF + findings + footnotes from the strategic analyst).
+  // We deliberately skip a separate compose-email LLM call to stay under
+  // Vercel Hobby's 60s function cap.
+  const titleStr = meeting.title ?? "your meeting";
+  const subject = `DataDonkey follow-up: ${titleStr}`;
   const report = buildReportMarkdown({
     meetingTitle: meeting.title,
-    headline: email.body,
     answered: answered.map((a) => ({
       question: a.question,
       reasoning: a.reasoning,
@@ -138,20 +149,21 @@ export async function POST(
 
   // Step 5: send to owner via Resend
   let emailedAt: Date | null = null;
+  let emailReason: string | undefined;
   if (conn.userEmail) {
-    const r = await sendFollowupEmail({
-      to: conn.userEmail,
-      subject: email.subject,
-      markdown: report,
-    });
+    const r = await sendFollowupEmail({ to: conn.userEmail, subject, markdown: report });
     if (r.sent) emailedAt = new Date();
+    else emailReason = r.reason;
+    console.log(`[followup] email to=${conn.userEmail} sent=${r.sent} reason=${r.reason ?? "-"}`);
+  } else {
+    console.log("[followup] no userEmail on connection — skipping email");
   }
 
   // Step 6: DM owner via Slack
   let slackedAt: Date | null = null;
   if (conn.slackConnected && conn.slackBotToken) {
     const slackText = `📊 Follow-up from "${meeting.title ?? "your meeting"}"\n\n${report}`;
-    let slackRes: { sent: boolean; reason?: string } = { sent: false };
+    let slackRes: { sent: boolean; reason?: string } = { sent: false, reason: "no_target" };
     if (conn.slackUserId) {
       slackRes = await dmAuthedUser({
         botToken: conn.slackBotToken,
@@ -166,6 +178,9 @@ export async function POST(
       });
     }
     if (slackRes.sent) slackedAt = new Date();
+    console.log(`[followup] slack sent=${slackRes.sent} reason=${slackRes.reason ?? "-"}`);
+  } else {
+    console.log(`[followup] slack skipped — connected=${conn.slackConnected} hasToken=${!!conn.slackBotToken}`);
   }
 
   await prisma.meeting.update({
@@ -175,8 +190,8 @@ export async function POST(
         answered.map(({ mcpPrompt: _mcpPrompt, ...rest }) => rest),
       ),
       followupsAt: new Date(),
-      emailSubject: email.subject,
-      emailDraft: email.body,
+      emailSubject: subject,
+      emailDraft: report,
       emailDraftAt: new Date(),
       followupReport: report,
       followupEmailedAt: emailedAt,
@@ -186,16 +201,15 @@ export async function POST(
 
   return NextResponse.json({
     followups: answered,
-    emailSubject: email.subject,
-    emailDraft: email.body,
+    emailSubject: subject,
+    emailDraft: report,
     followupReport: report,
-    delivered: { email: !!emailedAt, slack: !!slackedAt },
+    delivered: { email: !!emailedAt, slack: !!slackedAt, emailReason },
   });
 }
 
 function buildReportMarkdown(args: {
   meetingTitle: string | null;
-  headline: string;
   answered: Array<{
     question: string;
     reasoning: string;
@@ -203,7 +217,7 @@ function buildReportMarkdown(args: {
     posthogUrls?: string[];
   }>;
 }): string {
-  const head = `## Follow-up: ${args.meetingTitle ?? "your meeting"}\n\n${args.headline}\n\n---\n`;
+  const head = `## Follow-up: ${args.meetingTitle ?? "your meeting"}\n\n`;
   const body = args.answered
     .map(
       (a, i) =>

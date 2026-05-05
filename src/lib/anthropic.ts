@@ -146,9 +146,12 @@ Hard rules:
 Project ID: ${projectId}.${host ? ` Host: ${host}.` : ""} Today: ${today}.
 Region/timezone: assume the project's local time matches the data.`;
 
+  // Sonnet for the live path: good quality, ~3x faster than Opus, which
+  // matters when the bot is replying mid-call. 4000 max_tokens leaves room
+  // for 2-3 tool calls + a short final answer.
   const res = await anthropic.beta.messages.create({
-    model: "claude-opus-4-5",
-    max_tokens: 1024,
+    model: "claude-sonnet-4-6",
+    max_tokens: 4000,
     system: systemPrompt,
     messages,
     mcp_servers: [mcpServer],
@@ -237,9 +240,13 @@ Why this came up: ${reasoning}
 
 Answer it now using the data, with footnotes for the events and date ranges you used.`;
 
+  // Use Sonnet for speed (Opus is 3-5x slower per call). The strategic
+  // analyst writes ~150-300 words plus does 2-5 tool calls, so we need a
+  // generous output budget (each tool call eats tokens too). 6000 is plenty
+  // for the typical case while leaving headroom.
   const res = await anthropic.beta.messages.create({
-    model: "claude-opus-4-5",
-    max_tokens: 2000,
+    model: "claude-sonnet-4-6",
+    max_tokens: 6000,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
     mcp_servers: [mcpServer],
