@@ -26,12 +26,20 @@ model Connection {
   prefLive     Boolean  @default(true)
   prefFollowup Boolean  @default(true)
 
-  // Mocked OAuth state for prototype. Calendar/Slack toggles flip these to
-  // simulate "connected" until we wire up real OAuth.
+  // Calendar (Google) OAuth state
   calendarConnected Boolean  @default(false)
-  calendarProvider  String?  // "google" | "microsoft"
+  calendarProvider  String?  // "google"
+  googleAccessToken  String?
+  googleRefreshToken String?
+  googleTokenExpiry  DateTime?
+  googleEmail        String?
+
+  // Slack OAuth state
   slackConnected    Boolean  @default(false)
   slackTeamName     String?
+  slackTeamId       String?
+  slackBotToken     String?
+  slackUserId       String?
 
   updatedAt    DateTime @updatedAt
 }
@@ -51,6 +59,10 @@ model Meeting {
   emailSubject  String?
   emailDraft    String?
   emailDraftAt  DateTime?
+  followupReport     String?    // markdown rendered as the rich report body
+  followupEmailedAt  DateTime?
+  followupSlackedAt  DateTime?
+  followupAttempted  Boolean    @default(false)
   questions     Question[]
 }
 
@@ -60,6 +72,9 @@ model Question {
   meeting    Meeting  @relation(fields: [meetingId], references: [id])
   askerName  String?
   question   String
+  // Captured prompt that was sent to the MCP for the answer below.
+  // Stored so we can run prompt evals later.
+  mcpPrompt  String?
   answer     String
   latencyMs  Int?
   createdAt  DateTime @default(now())

@@ -17,6 +17,8 @@ export interface CredentialField {
   secret?: boolean;
   helpText?: string;
   required?: boolean;
+  // For host-style fields with a known set of regional defaults
+  regions?: { id: string; label: string; url: string }[];
 }
 
 export interface ProviderConfig {
@@ -52,8 +54,13 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
       { key: "projectId", label: "Project ID", placeholder: "361026", required: true },
       {
         key: "host",
-        label: "Host",
+        label: "Region",
         placeholder: "https://us.posthog.com",
+        regions: [
+          { id: "us", label: "US (most common)", url: "https://us.posthog.com" },
+          { id: "eu", label: "EU", url: "https://eu.posthog.com" },
+          { id: "custom", label: "Self-hosted", url: "" },
+        ],
       },
     ],
     setupHint:
@@ -62,7 +69,7 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
   mixpanel: {
     id: "mixpanel",
     name: "Mixpanel",
-    available: true,
+    available: false,
     hasOAuth: true,
     oauthLabel: "Continue with Mixpanel",
     mcpUrl: "https://mcp.mixpanel.com/mcp",
@@ -88,7 +95,7 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
   amplitude: {
     id: "amplitude",
     name: "Amplitude",
-    available: true,
+    available: false,
     hasOAuth: true,
     oauthLabel: "Continue with Amplitude",
     mcpUrl: "https://mcp.amplitude.com/mcp",

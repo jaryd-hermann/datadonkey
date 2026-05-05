@@ -39,6 +39,9 @@ interface Meeting {
   emailSubject: string | null;
   emailDraft: string | null;
   emailDraftAt: string | null;
+  followupReport: string | null;
+  followupEmailedAt: string | null;
+  followupSlackedAt: string | null;
   questions: Question[];
 }
 
@@ -230,34 +233,47 @@ export default function MeetingDetail({
           )}
         </section>
 
-        {/* 4. Email draft */}
+        {/* 4. Followup report (rich) + delivery status */}
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
-            Email we&apos;d send to participants
-          </h2>
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
+              Follow-up report
+            </h2>
+            <div className="flex items-center gap-2">
+              <DeliveryPill
+                ok={!!meeting.followupEmailedAt}
+                label={meeting.followupEmailedAt ? "Emailed" : "Email pending"}
+              />
+              <DeliveryPill
+                ok={!!meeting.followupSlackedAt}
+                label={meeting.followupSlackedAt ? "Slacked" : "Slack pending"}
+              />
+            </div>
+          </div>
           {!ranOnce ? (
             <div className="mt-3 text-sm text-zinc-500">
               Will be drafted after &ldquo;Generate&rdquo; runs.
             </div>
           ) : noQuestions ? (
             <div className="mt-3 rounded-md bg-zinc-50 p-4 text-sm text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
-              No email — nothing actionable to share.
+              Nothing actionable to share — no follow-up sent.
             </div>
           ) : (
-            <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950">
-              <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                Subject
+            <>
+              {meeting.emailSubject && (
+                <div className="mt-4">
+                  <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Subject
+                  </div>
+                  <div className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    {meeting.emailSubject}
+                  </div>
+                </div>
+              )}
+              <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-950">
+                <MarkdownView text={meeting.followupReport ?? meeting.emailDraft ?? ""} />
               </div>
-              <div className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                {meeting.emailSubject ?? "(no subject)"}
-              </div>
-              <div className="mt-4 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                Body
-              </div>
-              <pre className="mt-1 whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
-{meeting.emailDraft}
-              </pre>
-            </div>
+            </>
           )}
         </section>
 
@@ -300,4 +316,92 @@ export default function MeetingDetail({
       </div>
     </AppShell>
   );
+}
+
+function DeliveryPill({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span
+      className={
+        "rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider " +
+        (ok
+          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+          : "bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400")
+      }
+    >
+      {ok ? "✓ " : ""}
+      {label}
+    </span>
+  );
+}
+
+// Lightweight markdown renderer. Supports h2/h3 headings, bold, bullets,
+// links and the `---` divider used by the report. Adequate for prototype.
+function MarkdownView({ text }: { text: string }) {
+  const blocks = text.split(/\n{2,}/);
+  return (
+    <div className="space-y-3 text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+      {blocks.map((block, i) => {
+        if (block.trim() === "---") {
+          return <hr key={i} className="my-4 border-zinc-200 dark:border-zinc-800" />;
+        }
+        if (/^##\s/.test(block)) {
+          return (
+            <h2 key={i} className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+              {renderInline(block.replace(/^##\s/, ""))}
+            </h2>
+          );
+        }
+        if (/^###\s/.test(block)) {
+          return (
+            <h3 key={i} className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              {renderInline(block.replace(/^###\s/, ""))}
+            </h3>
+          );
+        }
+        const lines = block.split(/\n/);
+        if (lines.every((l) => /^[-•]\s+/.test(l))) {
+          return (
+            <ul key={i} className="ml-5 list-disc space-y-1">
+              {lines.map((l, j) => (
+                <li key={j}>{renderInline(l.replace(/^[-•]\s+/, ""))}</li>
+              ))}
+            </ul>
+          );
+        }
+        return (
+          <p key={i} className="whitespace-pre-wrap">
+            {renderInline(block)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderInline(text: string): React.ReactNode {
+  // very small inline parser: bold + links
+  const parts: React.ReactNode[] = [];
+  const re = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)]+)\)|(https?:\/\/\S+)/g;
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > lastIndex) parts.push(text.slice(lastIndex, m.index));
+    if (m[1] !== undefined) parts.push(<strong key={key++}>{m[1]}</strong>);
+    else if (m[2] !== undefined && m[3] !== undefined)
+      parts.push(
+        <a key={key++} href={m[3]} target="_blank" className="text-blue-600 underline hover:text-blue-700 dark:text-blue-400">
+          {m[2]}
+        </a>,
+      );
+    else if (m[4] !== undefined)
+      parts.push(
+        <a key={key++} href={m[4]} target="_blank" className="break-all font-mono text-xs text-blue-600 underline dark:text-blue-400">
+          {m[4]}
+        </a>,
+      );
+    lastIndex = m.index + m[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
 }

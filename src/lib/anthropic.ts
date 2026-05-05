@@ -89,6 +89,9 @@ export interface AskPostHogResult {
   toolCalls: Array<{ name: string; input: unknown }>;
   usage: { inputTokens: number; outputTokens: number };
   raw: unknown;
+  // The full prompt sent to the model (system + user). Captured so we can
+  // rerun evals against it later.
+  prompt: { system: string; user: string };
 }
 
 interface PriorTurn {
@@ -108,6 +111,7 @@ export async function askDataTool(
       toolCalls: [],
       usage: { inputTokens: 0, outputTokens: 0 },
       raw: null,
+      prompt: { system: "", user: question },
     };
   }
   const mcpServer = buildMcpServerConfig(provider, credentials);
@@ -117,6 +121,7 @@ export async function askDataTool(
       toolCalls: [],
       usage: { inputTokens: 0, outputTokens: 0 },
       raw: null,
+      prompt: { system: "", user: question },
     };
   }
 
@@ -128,10 +133,7 @@ export async function askDataTool(
     { role: "user", content: question },
   ];
 
-  const res = await anthropic.beta.messages.create({
-    model: "claude-opus-4-5",
-    max_tokens: 1024,
-    system: `You are a senior data analyst answering questions for a busy product manager during a live meeting. They want ANSWERS, not questions back. Their data tool is ${provider.name}.
+  const systemPrompt = `You are a senior data analyst answering questions for a busy product manager during a live meeting. They want ANSWERS, not questions back. Their data tool is ${provider.name}.
 
 Hard rules:
 - Never ask the user clarifying questions about their data setup. Figure it out.
@@ -142,7 +144,12 @@ Hard rules:
 - If after exploring you genuinely cannot find a relevant event, say so plainly with what you tried — don't ask the PM to specify.
 
 Project ID: ${projectId}.${host ? ` Host: ${host}.` : ""} Today: ${today}.
-Region/timezone: assume the project's local time matches the data.`,
+Region/timezone: assume the project's local time matches the data.`;
+
+  const res = await anthropic.beta.messages.create({
+    model: "claude-opus-4-5",
+    max_tokens: 1024,
+    system: systemPrompt,
     messages,
     mcp_servers: [mcpServer],
     betas: ["mcp-client-2025-04-04"],
@@ -171,6 +178,97 @@ Region/timezone: assume the project's local time matches the data.`,
       outputTokens: res.usage.output_tokens,
     },
     raw: res,
+    prompt: { system: systemPrompt, user: question },
+  };
+}
+
+// Strategic-analyst variant for post-meeting follow-up. Uses a richer system
+// prompt that asks for structured findings, footnotes for the events/decisions
+// the model used, and actionable + supportive framing. Returns a longer-form
+// markdown answer suitable for an email/Slack body.
+export async function askDataToolStrategic(
+  question: string,
+  reasoning: string,
+  provider: ProviderConfig,
+  credentials: Credentials,
+): Promise<AskPostHogResult> {
+  if (!provider.available) {
+    return {
+      answer: `${provider.name} live Q&A isn't available yet — its MCP server hasn't shipped.`,
+      toolCalls: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      raw: null,
+      prompt: { system: "", user: question },
+    };
+  }
+  const mcpServer = buildMcpServerConfig(provider, credentials);
+  if (!mcpServer) {
+    return {
+      answer: `Couldn't reach ${provider.name} — credentials missing or invalid.`,
+      toolCalls: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      raw: null,
+      prompt: { system: "", user: question },
+    };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const projectId = credentials.projectId ?? "(unknown)";
+  const host = credentials.host ?? "";
+
+  const systemPrompt = `You are a senior product analyst writing the data-backed answer to ONE specific question that came up in a meeting. The reader is a busy PM. Their data tool is ${provider.name}.
+
+Operating principles:
+- Best-guess, never ask. Use your judgment about which events, properties, and time windows are most relevant. If multiple interpretations exist, pick the one most useful to a PM and note your choice in the footnotes.
+- Strategic reasoning. Don't just dump a number. Compare to a baseline, segment by something meaningful (cohort, platform, surface), and note whether the result is significant or noisy. If you only have one data point, say so.
+- Bottom line up front. First sentence is the headline finding with the concrete number.
+- Be useful, not just accurate. Either give an action ("→ X is likely the lever") or supportive framing ("→ this looks healthy; here's the bar to watch for").
+- Footnotes for transparency. End with a short "Notes" section listing: which event(s) you queried, which date range, any caveats, and any judgment calls you made (e.g. "interpreted 'churn' as users with no $pageview in 14d").
+- Preserve any URLs returned by tool calls (insight links, dashboard links). Inline them next to the relevant finding.
+- Markdown is welcome (bold, bullets, links). No headings larger than ###.
+
+Length: ~120-220 words. This is a written follow-up, not a chat reply.
+
+Project ID: ${projectId}.${host ? ` Host: ${host}.` : ""} Today: ${today}.`;
+
+  const userPrompt = `Question from the meeting: ${question}
+
+Why this came up: ${reasoning}
+
+Answer it now using the data, with footnotes for the events and date ranges you used.`;
+
+  const res = await anthropic.beta.messages.create({
+    model: "claude-opus-4-5",
+    max_tokens: 2000,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userPrompt }],
+    mcp_servers: [mcpServer],
+    betas: ["mcp-client-2025-04-04"],
+  });
+
+  const textParts: string[] = [];
+  const toolCalls: AskPostHogResult["toolCalls"] = [];
+  for (const block of res.content as unknown as Array<Record<string, unknown>>) {
+    if (block.type === "text" && typeof block.text === "string") {
+      textParts.push(block.text);
+    }
+    if (block.type === "mcp_tool_use") {
+      toolCalls.push({
+        name: String(block.name ?? ""),
+        input: block.input,
+      });
+    }
+  }
+
+  return {
+    answer: textParts.join("\n").trim(),
+    toolCalls,
+    usage: {
+      inputTokens: res.usage.input_tokens,
+      outputTokens: res.usage.output_tokens,
+    },
+    raw: res,
+    prompt: { system: systemPrompt, user: userPrompt },
   };
 }
 

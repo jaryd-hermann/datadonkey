@@ -11,6 +11,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
     "@prisma/client": "^6.19.3",
+    "@slack/web-api": "^7.15.2",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.3",
     "dotenv": "^17.4.2",
@@ -19,6 +20,7 @@
     "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "resend": "^6.12.2",
     "tsx": "^4.21.0"
   },
   "devDependencies": {

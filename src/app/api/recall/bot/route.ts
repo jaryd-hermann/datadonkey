@@ -87,16 +87,51 @@ async function watchBot(botId: string, providerName: string) {
       // Welcome the moment we first see in-call.
       if (IN_CALL_STATES.has(latest) && !isWelcomed(botId)) {
         markWelcomed(botId);
-        const msg =
-          `👋 Hi, I'm DataDonkey, your data analyst. Say "Hey ${providerName}, …" and I'll look up data for you.\n` +
-          `Try: "Hey ${providerName}, how many users this week?" or "what dashboards do we have?"`;
-        await sendChatMessage(botId, msg);
+        const conn = await prisma.connection.findUnique({ where: { id: "default" } });
+        const live = conn?.prefLive ?? true;
+        const followup = conn?.prefFollowup ?? true;
+        const lines = [
+          `👋 Hi, I'm DataDonkey, your data analyst.`,
+        ];
+        if (live) {
+          lines.push(
+            `Say "Hey ${providerName}, …" and I'll answer in chat. Try: "Hey ${providerName}, how many users this week?"`,
+          );
+        }
+        if (followup) {
+          lines.push(`After this call, I'll send you a follow-up with any data points worth knowing.`);
+        }
+        await sendChatMessage(botId, lines.join("\n"));
       }
     }
 
-    if (latest && TERMINAL_STATES.has(latest)) return;
+    if (latest && TERMINAL_STATES.has(latest)) {
+      // Fire the auto-followup pipeline if the user opted in.
+      void triggerAutoFollowup(botId);
+      return;
+    }
 
     await new Promise((r) => setTimeout(r, 5_000));
+  }
+}
+
+async function triggerAutoFollowup(botId: string) {
+  try {
+    // Give Recall a moment to finalize the transcript on its side.
+    await new Promise((r) => setTimeout(r, 8_000));
+    const conn = await prisma.connection.findUnique({ where: { id: "default" } });
+    if (!conn?.prefFollowup) return;
+    const meeting = await prisma.meeting.findUnique({ where: { recallBotId: botId } });
+    if (!meeting || meeting.followupAttempted) return;
+    if (!meeting.transcript || !meeting.transcript.trim()) return;
+
+    const origin = process.env.APP_URL ?? "http://localhost:3000";
+    const r = await fetch(`${origin}/api/meetings/${meeting.id}/followup`, {
+      method: "POST",
+    });
+    if (!r.ok) console.warn("[auto-followup] failed", await r.text());
+  } catch (err) {
+    console.error("[auto-followup] error:", err);
   }
 }
 

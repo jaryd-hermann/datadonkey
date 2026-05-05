@@ -10,6 +10,7 @@ interface CredentialField {
   placeholder?: string;
   secret?: boolean;
   helpText?: string;
+  regions?: { id: string; label: string; url: string }[];
 }
 
 interface ConnectionInfo {
@@ -101,15 +102,23 @@ export default function OnboardingConnect() {
               <span className="text-sm font-medium text-stone-700 dark:text-stone-300">
                 {f.label}
               </span>
-              <input
-                type={f.secret ? "password" : "text"}
-                value={values[f.key] ?? ""}
-                onChange={(e) =>
-                  setValues((v) => ({ ...v, [f.key]: e.target.value }))
-                }
-                placeholder={f.placeholder}
-                className="mt-1.5 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
-              />
+              {f.regions ? (
+                <RegionPicker
+                  field={f}
+                  value={values[f.key] ?? f.placeholder ?? ""}
+                  onChange={(v) => setValues((vs) => ({ ...vs, [f.key]: v }))}
+                />
+              ) : (
+                <input
+                  type={f.secret ? "password" : "text"}
+                  value={values[f.key] ?? ""}
+                  onChange={(e) =>
+                    setValues((v) => ({ ...v, [f.key]: e.target.value }))
+                  }
+                  placeholder={f.placeholder}
+                  className="mt-1.5 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+                />
+              )}
               {f.helpText && (
                 <span
                   className="mt-1.5 block text-xs text-stone-500"
@@ -143,5 +152,53 @@ export default function OnboardingConnect() {
         </form>
       </div>
     </AppShell>
+  );
+}
+
+function RegionPicker({
+  field,
+  value,
+  onChange,
+}: {
+  field: CredentialField;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const regions = field.regions ?? [];
+  const matched = regions.find((r) => r.url === value);
+  const initial = matched?.id ?? (value && value !== field.placeholder ? "custom" : regions[0]?.id ?? "us");
+  const [selected, setSelected] = useState<string>(initial);
+  const isCustom = selected === "custom";
+
+  function pick(id: string) {
+    setSelected(id);
+    const r = regions.find((rr) => rr.id === id);
+    if (r && r.id !== "custom") onChange(r.url);
+    else if (r && r.id === "custom") onChange("");
+  }
+
+  return (
+    <div className="mt-1.5 space-y-2">
+      <select
+        value={selected}
+        onChange={(e) => pick(e.target.value)}
+        className="block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+      >
+        {regions.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.label}
+          </option>
+        ))}
+      </select>
+      {isCustom && (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://your-posthog.example.com"
+          className="block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+        />
+      )}
+    </div>
   );
 }

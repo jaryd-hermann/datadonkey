@@ -17,9 +17,9 @@ const STEPS: { id: StepId; label: string }[] = [
 ];
 
 const TOOLS = [
-  { id: "posthog", name: "PostHog", recommended: true, hasOAuth: true, oauthLabel: "Continue with PostHog" },
-  { id: "mixpanel", name: "Mixpanel", recommended: false, hasOAuth: true, oauthLabel: "Continue with Mixpanel" },
-  { id: "amplitude", name: "Amplitude", recommended: false, hasOAuth: true, oauthLabel: "Continue with Amplitude" },
+  { id: "posthog", name: "PostHog", recommended: true, hasOAuth: true, oauthLabel: "Continue with PostHog", available: true, iconSrc: "/posthogicon.png" },
+  { id: "mixpanel", name: "Mixpanel", recommended: false, hasOAuth: false, available: false, iconSrc: null },
+  { id: "amplitude", name: "Amplitude", recommended: false, hasOAuth: false, available: false, iconSrc: null },
 ] as const;
 
 type ToolId = (typeof TOOLS)[number]["id"];
@@ -31,6 +31,7 @@ interface CredentialField {
   secret?: boolean;
   helpText?: string;
   required?: boolean;
+  regions?: { id: string; label: string; url: string }[];
 }
 
 interface ProviderShape {
@@ -521,7 +522,8 @@ function AuthStep(props: {
         </div>
 
         <SecondaryButton type="button" onClick={() => props.onContinue("google")} disabled={props.busy}>
-          🔑 Continue with Google
+          <img src="https://www.google.com/favicon.ico" alt="" className="h-4 w-4" />
+          Continue with Google
         </SecondaryButton>
       </form>
     </div>
@@ -549,30 +551,47 @@ function ToolStep(props: {
       </p>
 
       <div className="mt-6 space-y-3">
-        {TOOLS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => props.setTool(t.id)}
-            className={`group flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition ${
-              props.tool === t.id
-                ? "border-stone-900 bg-stone-100 dark:border-stone-100 dark:bg-stone-800"
-                : "border-stone-200 hover:border-stone-300 dark:border-stone-800 dark:hover:border-stone-700"
-            }`}
-          >
-            <span className="flex items-center gap-2">
-              <span className="text-sm font-medium">{t.name}</span>
-              {t.recommended && (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
-                  Recommended
-                </span>
-              )}
-            </span>
-            <span className="text-stone-400">
-              {props.tool === t.id ? "✓" : ""}
-            </span>
-          </button>
-        ))}
+        {TOOLS.map((t) => {
+          const disabled = !t.available;
+          const selected = props.tool === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              disabled={disabled}
+              onClick={() => !disabled && props.setTool(t.id)}
+              className={`group flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition ${
+                disabled
+                  ? "cursor-not-allowed border-stone-200 bg-stone-50 opacity-70 dark:border-stone-800 dark:bg-stone-900/40"
+                  : selected
+                  ? "border-stone-900 bg-stone-100 dark:border-stone-100 dark:bg-stone-800"
+                  : "border-stone-200 hover:border-stone-300 dark:border-stone-800 dark:hover:border-stone-700"
+              }`}
+            >
+              <span className="flex items-center gap-2.5">
+                {t.iconSrc ? (
+                  <img src={t.iconSrc} alt="" className="h-5 w-5 rounded-sm object-contain" />
+                ) : (
+                  <span className="inline-block h-5 w-5 rounded-sm bg-stone-200 dark:bg-stone-700" />
+                )}
+                <span className="text-sm font-medium">{t.name}</span>
+                {t.recommended && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                    Recommended
+                  </span>
+                )}
+                {disabled && (
+                  <span className="rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-600 dark:bg-stone-700 dark:text-stone-300">
+                    Coming soon
+                  </span>
+                )}
+              </span>
+              <span className="text-stone-400">
+                {selected && !disabled ? "✓" : ""}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <AnimatePresence mode="wait">
@@ -592,17 +611,30 @@ function ToolStep(props: {
               <div className="space-y-3">
                 {props.provider.credentialFields.map((f) => (
                   <Field key={f.key} label={f.label}>
-                    <Input
-                      type={f.secret ? "password" : "text"}
-                      placeholder={f.placeholder}
-                      value={props.credValues[f.key] ?? ""}
-                      onChange={(e) =>
-                        props.setCredValues((prev: Record<string, string>) => ({
-                          ...prev,
-                          [f.key]: e.target.value,
-                        }))
-                      }
-                    />
+                    {f.regions ? (
+                      <RegionField
+                        field={f}
+                        value={props.credValues[f.key] ?? f.placeholder ?? ""}
+                        onChange={(v) =>
+                          props.setCredValues((prev: Record<string, string>) => ({
+                            ...prev,
+                            [f.key]: v,
+                          }))
+                        }
+                      />
+                    ) : (
+                      <Input
+                        type={f.secret ? "password" : "text"}
+                        placeholder={f.placeholder}
+                        value={props.credValues[f.key] ?? ""}
+                        onChange={(e) =>
+                          props.setCredValues((prev: Record<string, string>) => ({
+                            ...prev,
+                            [f.key]: e.target.value,
+                          }))
+                        }
+                      />
+                    )}
                     {f.helpText && (
                       <p
                         className="mt-1 text-xs text-stone-500"
@@ -623,7 +655,8 @@ function ToolStep(props: {
                   onClick={props.onSso}
                   className="mt-4"
                 >
-                  🔐 {props.provider.oauthLabel}
+                  <img src="/posthogicon.png" alt="" className="h-4 w-4 object-contain" />
+                  {props.provider.oauthLabel}
                 </SecondaryButton>
               )}
               <PrimaryButton
@@ -703,18 +736,26 @@ function CalendarStep(props: {
       </p>
 
       <div className="mt-6 space-y-3">
-        <ConnectButton
-          connected={props.connected && props.provider === "google"}
-          onClick={() => props.onConnect("google")}
-        >
-          📅 Connect Google Calendar
-        </ConnectButton>
-        <ConnectButton
-          connected={props.connected && props.provider === "microsoft"}
-          onClick={() => props.onConnect("microsoft")}
-        >
-          📅 Connect Outlook / Microsoft Calendar
-        </ConnectButton>
+        {props.connected && props.provider === "google" ? (
+          <div className="flex w-full items-center justify-between gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-100">
+            <span className="flex items-center gap-2.5">
+              <img src="/googlecal.png" alt="" className="h-5 w-5 object-contain" />
+              Google Calendar connected
+            </span>
+            <span>✓</span>
+          </div>
+        ) : (
+          <a
+            href="/api/oauth/google/start"
+            className="flex w-full items-center justify-between gap-2 rounded-md border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
+          >
+            <span className="flex items-center gap-2.5">
+              <img src="/googlecal.png" alt="" className="h-5 w-5 object-contain" />
+              Connect Google Calendar
+            </span>
+            <span>→</span>
+          </a>
+        )}
       </div>
 
       <p className="mt-4 text-xs text-stone-500">
@@ -754,9 +795,26 @@ function SlackStep(props: {
       </p>
 
       <div className="mt-6">
-        <ConnectButton connected={props.connected} onClick={props.onConnect}>
-          💬 Connect Slack
-        </ConnectButton>
+        {props.connected ? (
+          <div className="flex w-full items-center justify-between gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-100">
+            <span className="flex items-center gap-2.5">
+              <img src="/slackicon.png" alt="" className="h-5 w-5 object-contain" />
+              Slack connected
+            </span>
+            <span>✓</span>
+          </div>
+        ) : (
+          <a
+            href="/api/oauth/slack/start"
+            className="flex w-full items-center justify-between gap-2 rounded-md border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
+          >
+            <span className="flex items-center gap-2.5">
+              <img src="/slackicon.png" alt="" className="h-5 w-5 object-contain" />
+              Connect Slack
+            </span>
+            <span>→</span>
+          </a>
+        )}
       </div>
 
       <div className="mt-6 flex gap-3">
@@ -875,6 +933,53 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function RegionField({
+  field,
+  value,
+  onChange,
+}: {
+  field: CredentialField;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const regions = field.regions ?? [];
+  const matched = regions.find((r) => r.url === value);
+  const initial = matched?.id ?? (value && value !== field.placeholder ? "custom" : regions[0]?.id ?? "us");
+  const [selected, setSelected] = useState<string>(initial);
+  const isCustom = selected === "custom";
+
+  function pick(id: string) {
+    setSelected(id);
+    const r = regions.find((rr) => rr.id === id);
+    if (r && r.id !== "custom") onChange(r.url);
+    else if (r && r.id === "custom") onChange("");
+  }
+
+  return (
+    <div className="space-y-2">
+      <select
+        value={selected}
+        onChange={(e) => pick(e.target.value)}
+        className="block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:border-stone-500 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+      >
+        {regions.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.label}
+          </option>
+        ))}
+      </select>
+      {isCustom && (
+        <Input
+          type="text"
+          placeholder="https://your-posthog.example.com"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
@@ -912,10 +1017,12 @@ function ConnectButton({
   connected,
   onClick,
   children,
+  iconSrc,
 }: {
   connected: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  iconSrc?: string;
 }) {
   return (
     <button
@@ -927,7 +1034,10 @@ function ConnectButton({
           : "border-stone-300 bg-white text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
       }`}
     >
-      <span>{children}</span>
+      <span className="flex items-center gap-2.5">
+        {iconSrc && <img src={iconSrc} alt="" className="h-5 w-5 object-contain" />}
+        <span>{children}</span>
+      </span>
       <span>{connected ? "✓ connected" : "→"}</span>
     </button>
   );

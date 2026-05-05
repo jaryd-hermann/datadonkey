@@ -30,6 +30,8 @@ export interface ConnectionView {
   calendarProvider: string | null;
   slackConnected: boolean;
   slackTeamName: string | null;
+  slackBotToken: string | null;
+  slackUserId: string | null;
 }
 
 function parseCredentials(s: string | null): Credentials {
@@ -59,6 +61,8 @@ export async function readConnection(): Promise<ConnectionView> {
       calendarProvider: null,
       slackConnected: false,
       slackTeamName: null,
+      slackBotToken: null,
+      slackUserId: null,
     };
   }
   const provider = getProvider(row.provider);
@@ -85,6 +89,8 @@ export async function readConnection(): Promise<ConnectionView> {
     calendarProvider: row.calendarProvider,
     slackConnected: row.slackConnected,
     slackTeamName: row.slackTeamName,
+    slackBotToken: row.slackBotToken,
+    slackUserId: row.slackUserId,
   };
 }
 

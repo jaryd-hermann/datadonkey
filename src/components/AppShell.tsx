@@ -155,9 +155,9 @@ export function Wordmark({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
           and show a tinted version. For prototype, the same image works in
           both modes — the contrast on dark is acceptable. */}
       <img
-        src="/donkey-mark.png"
+        src="/datadonkey.png"
         alt=""
-        className={`${img} rounded-md object-cover`}
+        className={`${img} rounded-md object-contain`}
       />
       <span className={`${text} font-extrabold tracking-tight leading-none`}>
         <span className="text-stone-900 dark:text-stone-50">data</span>

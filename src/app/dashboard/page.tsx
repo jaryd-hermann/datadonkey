@@ -524,19 +524,14 @@ function ToolTab({ conn }: { conn: ConnectionInfo }) {
 }
 
 function CalendarTab({ conn, onChange }: { conn: ConnectionInfo; onChange: () => void }) {
-  async function connect(provider: "google" | "microsoft") {
-    await fetch("/api/connection", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ calendarConnected: true, calendarProvider: provider }),
-    });
-    onChange();
-  }
   async function disconnect() {
     await fetch("/api/connection", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ calendarConnected: false, calendarProvider: null }),
+      body: JSON.stringify({
+        calendarConnected: false,
+        calendarProvider: null,
+      }),
     });
     onChange();
   }
@@ -559,32 +554,29 @@ function CalendarTab({ conn, onChange }: { conn: ConnectionInfo; onChange: () =>
           </button>
         </div>
       ) : (
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <SecondaryAction onClick={() => connect("google")}>📅 Connect Google Calendar</SecondaryAction>
-          <SecondaryAction onClick={() => connect("microsoft")}>📅 Connect Outlook</SecondaryAction>
+        <div className="mt-4">
+          <a
+            href="/api/oauth/google/start"
+            className="inline-flex items-center gap-2 rounded-md border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
+          >
+            <img src="/googlecal.png" alt="" className="h-4 w-4 object-contain" />
+            Connect Google Calendar
+          </a>
         </div>
       )}
-      <p className="mt-3 text-xs text-stone-500">
-        (Mock for prototype — no real OAuth yet. Wire up Google / Microsoft OAuth before launch.)
-      </p>
     </Card>
   );
 }
 
 function SlackTab({ conn, onChange }: { conn: ConnectionInfo; onChange: () => void }) {
-  async function connect() {
-    await fetch("/api/connection", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slackConnected: true, slackTeamName: "Demo workspace" }),
-    });
-    onChange();
-  }
   async function disconnect() {
     await fetch("/api/connection", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slackConnected: false, slackTeamName: null }),
+      body: JSON.stringify({
+        slackConnected: false,
+        slackTeamName: null,
+      }),
     });
     onChange();
   }
@@ -607,13 +599,14 @@ function SlackTab({ conn, onChange }: { conn: ConnectionInfo; onChange: () => vo
           </button>
         </div>
       ) : (
-        <SecondaryAction onClick={connect} className="mt-4">
-          💬 Connect Slack
-        </SecondaryAction>
+        <a
+          href="/api/oauth/slack/start"
+          className="mt-4 inline-flex items-center gap-2 rounded-md border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
+        >
+          <img src="/slackicon.png" alt="" className="h-4 w-4 object-contain" />
+          Connect Slack
+        </a>
       )}
-      <p className="mt-3 text-xs text-stone-500">
-        (Mock for prototype — wire up Slack OAuth before launch.)
-      </p>
     </Card>
   );
 }
