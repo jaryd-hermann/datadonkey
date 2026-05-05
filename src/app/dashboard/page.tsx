@@ -31,6 +31,9 @@ interface ConnectionInfo {
   userCompany: string | null;
   userEmail: string | null;
   provider: { id: string; name: string; available: boolean };
+  credentials: Record<string, string>;
+  projectName: string | null;
+  organizationName: string | null;
   prefLive: boolean;
   prefFollowup: boolean;
   calendarConnected: boolean;
@@ -88,6 +91,7 @@ export default function Dashboard() {
     >
       <div className="mx-auto max-w-5xl px-6 py-8">
         <ProgressNav tab={tab} setTab={setTab} conn={conn} />
+        <QuickInviteBar conn={conn} onChange={load} />
         <div className="mt-8">
           <AnimatePresence mode="wait">
             <motion.div
@@ -129,14 +133,30 @@ function ProgressNav({
   setTab: (t: TabId) => void;
   conn: ConnectionInfo;
 }) {
-  const items: { id: TabId; label: string; done: boolean }[] = [
+  const items: {
+    id: TabId;
+    label: string;
+    done: boolean;
+    iconSrc?: string;
+  }[] = [
     {
       id: "tool",
       label: conn.connected ? `${conn.provider.name} connected` : `Connect ${conn.provider.name}`,
       done: conn.connected,
+      iconSrc: conn.provider.id === "posthog" ? "/posthogicon.png" : undefined,
     },
-    { id: "calendar", label: "Calendar", done: conn.calendarConnected },
-    { id: "slack", label: "Slack", done: conn.slackConnected },
+    {
+      id: "calendar",
+      label: "Calendar",
+      done: conn.calendarConnected,
+      iconSrc: "/googlecal.png",
+    },
+    {
+      id: "slack",
+      label: "Slack",
+      done: conn.slackConnected,
+      iconSrc: "/slackicon.png",
+    },
     {
       id: "preferences",
       label: "Preferences",
@@ -172,11 +192,64 @@ function ProgressNav({
             >
               {it.done ? "✓" : "·"}
             </span>
+            {it.iconSrc && (
+              <img src={it.iconSrc} alt="" className="h-3.5 w-3.5 object-contain" />
+            )}
             <span>{it.label}</span>
           </button>
         );
       })}
     </div>
+  );
+}
+
+function QuickInviteBar({ conn, onChange }: { conn: ConnectionInfo; onChange: () => void }) {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const platform = detectPlatform(url);
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    if (!url) return;
+    setBusy(true);
+    const r = await fetch("/api/recall/bot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meetingUrl: url }),
+    });
+    setBusy(false);
+    if (r.ok) {
+      setUrl("");
+      onChange();
+    }
+  }
+
+  return (
+    <form onSubmit={send} className="mt-4 flex gap-2">
+      <div className="relative flex-1">
+        <input
+          type="url"
+          placeholder="Quick invite — paste a Meet, Teams, or Zoom link…"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          className="w-full rounded-full border border-stone-200 bg-white px-4 py-2 pr-24 text-sm focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-200 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-100"
+        />
+        {platform !== "unknown" && url && (
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-700 dark:bg-stone-800 dark:text-stone-300">
+            {platform}
+          </span>
+        )}
+      </div>
+      {url && (
+        <button
+          type="submit"
+          disabled={busy || !conn.connected}
+          className="rounded-full bg-orange-600 px-5 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
+        >
+          {busy ? "Joining…" : "Join"}
+        </button>
+      )}
+    </form>
   );
 }
 
@@ -243,31 +316,41 @@ function MeetingsTab({
         )}
       </div>
 
-      <HowItWorks providerName={conn.provider.name} />
-
-      {/* Send-to-call form */}
+      {/* Hero: invite DataDonkey to a call. This is the main action — bigger,
+          orange CTA, gradient background. */}
       <form
         onSubmit={send}
-        className="mt-6 rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900"
+        className="relative mt-6 overflow-hidden rounded-2xl border-2 border-orange-500/30 bg-gradient-to-br from-orange-50 via-amber-50 to-rose-50 p-6 shadow-sm dark:border-orange-500/20 dark:from-orange-950/20 dark:via-amber-950/10 dark:to-rose-950/10 sm:p-8"
       >
-        <label className="block">
+        <div className="absolute -right-8 -top-8 h-32 w-32 rotate-12 rounded-full bg-orange-200/40 blur-3xl dark:bg-orange-500/10" />
+        <div className="relative">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">Invite DataDonkey to a meeting</span>
+            <span className="rounded-full bg-orange-600 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+              Main action
+            </span>
             <span className="text-xs text-stone-500">supports</span>
             <PlatformIcons />
           </div>
-          <div className="mt-3 flex gap-2">
+          <h2 className="mt-3 text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-100 sm:text-3xl">
+            Invite DataDonkey to a meeting
+          </h2>
+          <p className="mt-1.5 text-sm text-stone-600 dark:text-stone-400">
+            Drop in a Google Meet, Teams, or Zoom link — DataDonkey joins,
+            listens, and follows up with the data that matters.
+          </p>
+
+          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
             <div className="relative flex-1">
               <input
                 type="url"
-                placeholder="Paste a Google Meet, Microsoft Teams, or Zoom link…"
+                placeholder="Paste your meeting link here…"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 pr-20 text-sm dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100"
+                className="w-full rounded-xl border-2 border-stone-200 bg-white px-4 py-4 pr-24 text-base font-medium shadow-sm focus:border-orange-500 focus:outline-none focus:ring-4 focus:ring-orange-200/60 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100"
                 required
               />
               {platform !== "unknown" && url && (
-                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-700 dark:bg-stone-800 dark:text-stone-300">
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700 dark:bg-stone-800 dark:text-stone-300">
                   {platform}
                 </span>
               )}
@@ -275,30 +358,34 @@ function MeetingsTab({
             <button
               type="submit"
               disabled={busy || !conn.connected}
-              className="shrink-0 rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-stone-50 hover:bg-stone-800 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-stone-200"
+              className="shrink-0 rounded-xl bg-orange-600 px-6 py-4 text-base font-semibold text-white shadow-md transition hover:bg-orange-700 hover:shadow-lg disabled:opacity-50 sm:py-4"
             >
-              {busy ? "Dispatching…" : "Send DataDonkey"}
+              {busy ? "Dispatching…" : "Send DataDonkey →"}
             </button>
           </div>
-        </label>
-        {!conn.connected && (
-          <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
-            Connect {conn.provider.name} first (Tool tab) to dispatch the bot.
-          </p>
-        )}
-        {error && (
-          <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">
-            {error}
-          </div>
-        )}
-        <p className="mt-3 text-xs text-stone-500">
-          Once joined, anyone can say{" "}
-          <code className="rounded bg-stone-100 px-1 py-0.5 font-mono dark:bg-stone-800">
-            Hey {conn.provider.name}, …
-          </code>{" "}
-          in the call to ask a question.
-        </p>
+          {!conn.connected && (
+            <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+              Connect {conn.provider.name} first (Tool tab) to dispatch the bot.
+            </p>
+          )}
+          {error && (
+            <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">
+              {error}
+            </div>
+          )}
+          {conn.prefLive && (
+            <p className="mt-3 text-xs text-stone-500">
+              Once joined, anyone can say{" "}
+              <code className="rounded bg-stone-100 px-1 py-0.5 font-mono dark:bg-stone-800">
+                Hey {conn.provider.name}, …
+              </code>{" "}
+              in the call to ask a question.
+            </p>
+          )}
+        </div>
       </form>
+
+      <HowItWorks providerName={conn.provider.name} />
 
       {/* Active meetings (live + still-joining) */}
       {active.length > 0 && (
@@ -502,24 +589,112 @@ function StatusBadge({ meeting }: { meeting: Meeting }) {
 // ----------- secondary tabs -----------
 
 function ToolTab({ conn }: { conn: ConnectionInfo }) {
+  const isPosthog = conn.provider.id === "posthog";
+  const iconSrc = isPosthog ? "/posthogicon.png" : null;
+  const projectId = conn.credentials?.projectId;
+  const region = conn.credentials?.host?.includes("eu.posthog.com")
+    ? "EU"
+    : conn.credentials?.host?.includes("us.posthog.com")
+      ? "US"
+      : conn.credentials?.host
+        ? "Self-hosted"
+        : null;
+
   return (
-    <Card title={`${conn.provider.name} connection`}>
-      {conn.connected ? (
-        <p className="text-sm text-stone-700 dark:text-stone-300">
-          Connected. DataDonkey will query {conn.provider.name} via its MCP server.
-        </p>
-      ) : (
-        <p className="text-sm text-amber-800 dark:text-amber-300">
-          Not connected — DataDonkey can&apos;t answer questions until you finish the connection.
-        </p>
-      )}
-      <a
-        href="/onboarding/connect"
-        className="mt-4 inline-flex rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
-      >
-        {conn.connected ? "Reconnect" : `Connect ${conn.provider.name}`}
-      </a>
-    </Card>
+    <div className="rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900">
+      <div className="flex items-start gap-4">
+        {iconSrc && (
+          <img
+            src={iconSrc}
+            alt=""
+            className="h-12 w-12 shrink-0 rounded-lg border border-stone-200 bg-white p-1.5 dark:border-stone-800 dark:bg-stone-800"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">
+              {conn.provider.name}
+            </h2>
+            {conn.connected ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M12 2l2.39 4.84L20 8l-3.84 3.74L17.78 18 12 15.27 6.22 18l1.62-6.26L4 8l5.61-1.16L12 2z" />
+                </svg>
+                Verified
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-300">
+                Not connected
+              </span>
+            )}
+          </div>
+          {conn.connected && (
+            <div className="mt-1 text-sm text-stone-600 dark:text-stone-400">
+              {conn.organizationName && (
+                <span className="font-medium text-stone-900 dark:text-stone-100">
+                  {conn.organizationName}
+                </span>
+              )}
+              {conn.organizationName && conn.projectName && (
+                <span className="mx-1.5 text-stone-400">·</span>
+              )}
+              {conn.projectName && <span>{conn.projectName}</span>}
+              {projectId && (
+                <span className="ml-2 rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] text-stone-600 dark:bg-stone-800 dark:text-stone-400">
+                  #{projectId}
+                </span>
+              )}
+              {region && (
+                <span className="ml-2 text-[11px] text-stone-500">{region}</span>
+              )}
+            </div>
+          )}
+        </div>
+        <a
+          href="/onboarding/connect"
+          className="shrink-0 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
+        >
+          {conn.connected ? "Reconnect" : `Connect ${conn.provider.name}`}
+        </a>
+      </div>
+
+      {/* What this means — DataDonkey's role */}
+      <div className="mt-6 rounded-lg border border-stone-100 bg-amber-50/60 p-4 dark:border-stone-800 dark:bg-amber-950/10">
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-stone-500">
+          We&apos;re just the carrier
+        </h3>
+        <ul className="mt-3 space-y-2 text-sm text-stone-700 dark:text-stone-300">
+          <li className="flex gap-2">
+            <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />
+            <span>
+              Your data <strong>stays in {conn.provider.name}</strong>. DataDonkey
+              never stores it — we read what&apos;s needed and forget.
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />
+            <span>
+              We bring the right data to <strong>where decisions happen</strong>{" "}
+              — your meetings, Slack, email — not behind a login screen.
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />
+            <span>
+              Powered by {conn.provider.name}&apos;s official MCP server. Same
+              read-only scopes as a Personal API Key — auditable in your{" "}
+              {conn.provider.name} settings, revocable anytime.
+            </span>
+          </li>
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -646,18 +821,18 @@ function PreferencesTab({ conn, onChange }: { conn: ConnectionInfo; onChange: ()
 
   return (
     <Card title="Preferences">
-      <div className="space-y-3">
+      <div className="space-y-4">
+        <SmartFollowsCard
+          checked={followup}
+          onChange={() => update("followup")}
+          providerName={conn.provider.name}
+        />
         <PrefRow
           checked={live}
           onChange={() => update("live")}
           title={`"Hey ${conn.provider.name}" — answer live in calls`}
           subtitle="Reply in chat in 5–10s when someone uses the wake word."
-        />
-        <PrefRow
-          checked={followup}
-          onChange={() => update("followup")}
-          title="Smart fast follows"
-          subtitle="After each call, surface data questions and email everyone the answers."
+          badge="Available, but not great yet"
         />
       </div>
       {error && (
@@ -669,16 +844,105 @@ function PreferencesTab({ conn, onChange }: { conn: ConnectionInfo; onChange: ()
   );
 }
 
+function SmartFollowsCard({
+  checked,
+  onChange,
+  providerName,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  providerName: string;
+}) {
+  return (
+    <div
+      className={`relative overflow-hidden rounded-xl border-2 p-5 transition ${
+        checked
+          ? "border-orange-500/50 bg-gradient-to-br from-orange-50 to-amber-50 dark:border-orange-500/30 dark:from-orange-950/20 dark:to-amber-950/10"
+          : "border-stone-200 dark:border-stone-800"
+      }`}
+    >
+      <div className="flex items-start gap-4">
+        <button
+          type="button"
+          onClick={onChange}
+          className={`mt-1 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+            checked ? "bg-orange-600" : "bg-stone-300 dark:bg-stone-700"
+          }`}
+          aria-pressed={checked}
+        >
+          <motion.span
+            animate={{ x: checked ? 22 : 2 }}
+            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            className="inline-block h-5 w-5 rounded-full bg-white shadow-md"
+          />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold text-stone-900 dark:text-stone-100">
+              Smart fast follows
+            </h3>
+            <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
+              Recommended
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-stone-700 dark:text-stone-300">
+            DataDonkey listens to your meetings and, after, sends you a private
+            briefing of the data questions that came up — answered with real
+            numbers from {providerName}.
+          </p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-stone-200 bg-white/70 p-3 dark:border-stone-800 dark:bg-stone-900/50">
+              <div className="text-xs font-semibold text-stone-900 dark:text-stone-100">
+                What it&apos;s trained on
+              </div>
+              <ul className="mt-1.5 space-y-1 text-xs text-stone-600 dark:text-stone-400">
+                <li>• Spotting data questions, asked or not</li>
+                <li>• Picking the right metric without being told</li>
+                <li>• Strategic reasoning over your event taxonomy</li>
+                <li>• Surfacing things you&apos;d miss otherwise</li>
+              </ul>
+            </div>
+            <div className="rounded-lg border border-stone-200 bg-white/70 p-3 dark:border-stone-800 dark:bg-stone-900/50">
+              <div className="text-xs font-semibold text-stone-900 dark:text-stone-100">
+                What you get
+              </div>
+              <ul className="mt-1.5 space-y-1 text-xs text-stone-600 dark:text-stone-400">
+                <li>• Email + Slack DM after each call</li>
+                <li>• Bottom-line-up-front findings</li>
+                <li>• Footnotes on events &amp; assumptions used</li>
+                <li>• Links straight to the {providerName} chart</li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-dashed border-stone-300 bg-white/50 p-3 text-xs text-stone-600 dark:border-stone-700 dark:bg-stone-900/30 dark:text-stone-400">
+            <span className="font-medium text-stone-900 dark:text-stone-100">
+              Example —
+            </span>{" "}
+            you and your designer brainstorm a new onboarding flow. After the
+            call, DataDonkey digs into your funnel data and shares an actionable
+            finding: where users actually drop off today, and which step would
+            move the needle most. Helping you build something people want.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PrefRow({
   checked,
   onChange,
   title,
   subtitle,
+  badge,
 }: {
   checked: boolean;
   onChange: () => void;
   title: string;
   subtitle: string;
+  badge?: string;
 }) {
   return (
     <button
@@ -701,9 +965,16 @@ function PrefRow({
           className="inline-block h-4 w-4 rounded-full bg-white shadow-sm"
         />
       </span>
-      <span>
-        <span className="block text-sm font-medium text-stone-900 dark:text-stone-100">
-          {title}
+      <span className="flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-stone-900 dark:text-stone-100">
+            {title}
+          </span>
+          {badge && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-300">
+              {badge}
+            </span>
+          )}
         </span>
         <span className="mt-0.5 block text-xs text-stone-600 dark:text-stone-400">
           {subtitle}

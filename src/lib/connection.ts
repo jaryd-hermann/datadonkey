@@ -32,6 +32,7 @@ export interface ConnectionView {
   slackTeamName: string | null;
   slackBotToken: string | null;
   slackUserId: string | null;
+  slackBotUserId: string | null;
 }
 
 function parseCredentials(s: string | null): Credentials {
@@ -55,7 +56,7 @@ export async function readConnection(): Promise<ConnectionView> {
       userEmail: null,
       provider: getProvider("posthog"),
       credentials: {},
-      prefLive: true,
+      prefLive: false,
       prefFollowup: true,
       calendarConnected: false,
       calendarProvider: null,
@@ -63,6 +64,7 @@ export async function readConnection(): Promise<ConnectionView> {
       slackTeamName: null,
       slackBotToken: null,
       slackUserId: null,
+      slackBotUserId: null,
     };
   }
   const provider = getProvider(row.provider);
@@ -91,6 +93,7 @@ export async function readConnection(): Promise<ConnectionView> {
     slackTeamName: row.slackTeamName,
     slackBotToken: row.slackBotToken,
     slackUserId: row.slackUserId,
+    slackBotUserId: row.slackBotUserId,
   };
 }
 

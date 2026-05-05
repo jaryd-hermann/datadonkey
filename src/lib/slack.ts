@@ -1,6 +1,15 @@
 import { WebClient } from "@slack/web-api";
+import crypto from "crypto";
 
-const SCOPES = ["chat:write", "im:write", "users:read", "users:read.email"];
+const SCOPES = [
+  "chat:write",
+  "im:write",
+  "users:read",
+  "users:read.email",
+  "app_mentions:read",
+  "im:history",
+  "im:read",
+];
 
 export function buildSlackInstallUrl(state: string, redirectUri: string) {
   const clientId = process.env.SLACK_CLIENT_ID;
@@ -72,6 +81,47 @@ export async function dmUserByEmail(args: {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[slack] DM failed:", msg);
     return { sent: false, reason: msg };
+  }
+}
+
+// Verify Slack request signature per
+// https://api.slack.com/authentication/verifying-requests-from-slack
+export function verifySlackSignature(
+  rawBody: string,
+  timestamp: string | null,
+  signature: string | null,
+): boolean {
+  const secret = process.env.SLACK_SIGNING_SECRET;
+  if (!secret || !timestamp || !signature) return false;
+  // Reject stale (>5 min) requests to thwart replay attacks
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - parseInt(timestamp, 10)) > 60 * 5) return false;
+  const base = `v0:${timestamp}:${rawBody}`;
+  const expected =
+    "v0=" + crypto.createHmac("sha256", secret).update(base).digest("hex");
+  // timingSafeEqual requires equal-length buffers
+  if (expected.length !== signature.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+}
+
+export async function postSlackMessage(args: {
+  botToken: string;
+  channel: string;
+  text: string;
+  threadTs?: string;
+}): Promise<{ ok: boolean; ts?: string; reason?: string }> {
+  try {
+    const c = new WebClient(args.botToken);
+    const r = await c.chat.postMessage({
+      channel: args.channel,
+      text: args.text,
+      thread_ts: args.threadTs,
+    });
+    return { ok: !!r.ok, ts: r.ts ?? undefined };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[slack] postMessage failed:", msg);
+    return { ok: false, reason: msg };
   }
 }
 

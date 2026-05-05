@@ -126,13 +126,25 @@ function ProfileMenu({
               <div className="mt-1 truncate text-xs text-stone-500">{user.email}</div>
             )}
           </div>
+          <a
+            href={
+              process.env.NEXT_PUBLIC_WHATSAPP_URL ||
+              "https://chat.whatsapp.com/"
+            }
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+          >
+            <span aria-hidden="true">💬</span>
+            Help me build this on WhatsApp
+          </a>
           <button
             onClick={async () => {
               const supabase = createSupabaseBrowserClient();
               await supabase.auth.signOut();
               window.location.href = "/";
             }}
-            className="block w-full px-4 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800"
+            className="block w-full border-t border-stone-100 px-4 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 dark:border-stone-800 dark:text-stone-200 dark:hover:bg-stone-800"
           >
             Sign out
           </button>
@@ -144,24 +156,37 @@ function ProfileMenu({
 
 // Wordmark logo: small donkey mark + "datadonkey" with the data/donkey
 // color split. Adapts to light/dark.
-export function Wordmark({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
+export function Wordmark({
+  size = "md",
+  showSlogan = true,
+}: {
+  size?: "sm" | "md" | "lg";
+  showSlogan?: boolean;
+}) {
   const text =
     size === "sm" ? "text-base" : size === "lg" ? "text-3xl" : "text-xl";
   const img = size === "sm" ? "h-5 w-5" : size === "lg" ? "h-9 w-9" : "h-7 w-7";
+  const slogan =
+    size === "sm" ? "text-[9px]" : size === "lg" ? "text-xs" : "text-[10px]";
   return (
     <span className="inline-flex items-center gap-2">
-      {/* Cropped donkey from the brand image. The cream background blends
-          with the page's stone-50; in dark mode we hide it via dark:hidden
-          and show a tinted version. For prototype, the same image works in
-          both modes — the contrast on dark is acceptable. */}
       <img
         src="/datadonkey.png"
         alt=""
         className={`${img} rounded-md object-contain`}
       />
-      <span className={`${text} font-extrabold tracking-tight leading-none`}>
-        <span className="text-stone-900 dark:text-stone-50">data</span>
-        <span className="text-orange-700 dark:text-orange-400">donkey</span>
+      <span className="inline-flex flex-col leading-none">
+        <span className={`${text} font-extrabold tracking-tight leading-none`}>
+          <span className="text-stone-900 dark:text-stone-50">data</span>
+          <span className="text-orange-700 dark:text-orange-400">donkey</span>
+        </span>
+        {showSlogan && (
+          <span
+            className={`${slogan} mt-0.5 italic tracking-wide text-stone-500 dark:text-stone-400`}
+          >
+            the right data without having to ask for it
+          </span>
+        )}
       </span>
     </span>
   );

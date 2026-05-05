@@ -1,10 +1,38 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
 import { readConnection, saveCredentials, saveSignup } from "@/lib/connection";
 import { getProvider, type ProviderId } from "@/lib/providers";
+import { sendWelcomeEmail, addToResendAudience } from "@/lib/email";
 
 export async function GET() {
   const conn = await readConnection();
+  // Best-effort: surface PostHog org/project name for the connection card.
+  let projectName: string | null = null;
+  let organizationName: string | null = null;
+  if (conn.connected && conn.provider.id === "posthog") {
+    const apiKey = conn.credentials.apiKey;
+    const projectId = conn.credentials.projectId;
+    const host = conn.credentials.host || "https://us.posthog.com";
+    if (apiKey && projectId) {
+      try {
+        const r = await fetch(`${host}/api/projects/${projectId}/`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          // 5s budget — never block dashboard load on PostHog
+          signal: AbortSignal.timeout(5000),
+        });
+        if (r.ok) {
+          const j = (await r.json()) as {
+            name?: string;
+            organization?: { name?: string };
+          };
+          projectName = j.name ?? null;
+          organizationName = j.organization?.name ?? null;
+        }
+      } catch {
+        // fall through with nulls
+      }
+    }
+  }
   return NextResponse.json({
     exists: conn.exists,
     signedUp: conn.signedUp,
@@ -22,6 +50,8 @@ export async function GET() {
       setupHint: conn.provider.setupHint,
     },
     credentials: redactCredentials(conn.credentials),
+    projectName,
+    organizationName,
     prefLive: conn.prefLive,
     prefFollowup: conn.prefFollowup,
     calendarConnected: conn.calendarConnected,
@@ -81,7 +111,28 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  // Detect first-time signup so we can fire the welcome email exactly once.
+  const before = await prisma.connection.findUnique({ where: { id: "default" } });
+  const wasNew = !before?.welcomeEmailedAt;
   await saveSignup({ userName, userCompany, userEmail, provider });
+
+  if (wasNew && userEmail) {
+    after(async () => {
+      try {
+        const r = await sendWelcomeEmail({ to: userEmail, name: userName });
+        if (r.sent) {
+          await prisma.connection.update({
+            where: { id: "default" },
+            data: { welcomeEmailedAt: new Date() },
+          });
+        }
+        // Best-effort audience add (broadcast list)
+        await addToResendAudience({ email: userEmail, name: userName });
+      } catch (err) {
+        console.error("[signup] lifecycle email failed:", err);
+      }
+    });
+  }
   return NextResponse.json({ ok: true });
 }
 

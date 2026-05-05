@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
         slackTeamName: tok.team_name,
         slackBotToken: tok.bot_token,
         slackUserId: tok.authed_user_id,
+        slackBotUserId: tok.bot_user_id,
       },
       update: {
         slackConnected: true,
@@ -31,6 +32,7 @@ export async function GET(req: NextRequest) {
         slackTeamName: tok.team_name,
         slackBotToken: tok.bot_token,
         slackUserId: tok.authed_user_id,
+        slackBotUserId: tok.bot_user_id,
       },
     });
     return NextResponse.redirect(new URL("/dashboard?slack=ok#slack", url.origin));

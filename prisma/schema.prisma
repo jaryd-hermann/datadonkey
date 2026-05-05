@@ -23,9 +23,14 @@ model Connection {
   provider     String   @default("posthog")
   credentials  String?
 
-  // Preferences (at least one must be true to make sense of the product)
-  prefLive     Boolean  @default(true)
+  // Preferences (at least one must be true to make sense of the product).
+  // Hey-PostHog live mode is opt-in (rough UX); fast-follows is the default.
+  prefLive     Boolean  @default(false)
   prefFollowup Boolean  @default(true)
+
+  // Lifecycle emails — set on send so we don't double-send
+  welcomeEmailedAt    DateTime?
+  firstCallEmailedAt  DateTime?
 
   // Calendar (Google) OAuth state
   calendarConnected Boolean  @default(false)
@@ -41,6 +46,7 @@ model Connection {
   slackTeamId       String?
   slackBotToken     String?
   slackUserId       String?
+  slackBotUserId    String?
 
   updatedAt    DateTime @updatedAt
 }
