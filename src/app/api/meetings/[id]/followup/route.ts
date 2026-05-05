@@ -64,9 +64,10 @@ export async function POST(
   // for two reasons: (1) avoid Anthropic rate limits on concurrent
   // mcp_servers calls, (2) Vercel Hobby caps function execution at 60s, so
   // we'd rather get 1-2 great answers than time out 3 mediocre ones.
-  // Cap to the first 2 questions to comfortably fit in Vercel Hobby's 60s
-  // function cap. On Pro (300s) we could safely raise this to 5+.
-  const QUESTION_BUDGET = 2;
+  // Vercel Pro gives 300s of function time. Each strategic query takes
+  // ~12-25s, so 6 questions in sequence (≈ 90-150s) fits comfortably with
+  // headroom for analyzeTranscript + email + Slack at the end.
+  const QUESTION_BUDGET = 6;
   const queue = identified.slice(0, QUESTION_BUDGET);
   const skipped = identified.slice(QUESTION_BUDGET);
   const answered: Array<FollowupQuestion & { mcpPrompt: string }> = [];
