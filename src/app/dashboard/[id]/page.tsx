@@ -93,9 +93,11 @@ export default function MeetingDetail({
   const transcriptReady = !!meeting.transcript && meeting.transcript.length > 0;
   const ranOnce = !!meeting.followupsAt;
   const noQuestions = ranOnce && meeting.followups.length === 0;
-  // Generate fetches the latest transcript from Recall on demand, so it works
-  // even before we have a local copy.
-  const canGenerate = !running;
+  // The fn may have been started but not yet finished (e.g. it timed out
+  // server-side, or it's still running and we navigated away mid-call).
+  // Treat this as still working so the UI doesn't lie.
+  const inflight = running || (!!(meeting as { followupAttempted?: boolean }).followupAttempted && !ranOnce);
+  const canGenerate = !inflight;
 
   return (
     <AppShell showAppNav>
@@ -164,7 +166,7 @@ export default function MeetingDetail({
               disabled={!canGenerate}
               className="shrink-0 rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
             >
-              {running ? "Working…" : ranOnce ? "Re-generate" : "Generate"}
+              {inflight ? "Working…" : ranOnce ? "Re-generate" : "Generate"}
             </button>
           </div>
           {!transcriptReady && !running && (

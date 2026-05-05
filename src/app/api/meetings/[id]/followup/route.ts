@@ -37,10 +37,13 @@ export async function POST(
     );
   }
 
+  const tStart = Date.now();
+  console.log(`[followup] START meeting=${id} transcript=${meeting.transcript.length}c`);
   await prisma.meeting.update({ where: { id }, data: { followupAttempted: true } });
 
   // Step 1: identify questions worth answering
   const identified = await analyzeTranscript(meeting.transcript);
+  console.log(`[followup] analyzed in ${Date.now() - tStart}ms -> ${identified.length} questions`);
 
   if (identified.length === 0) {
     await prisma.meeting.update({
@@ -61,8 +64,9 @@ export async function POST(
   // for two reasons: (1) avoid Anthropic rate limits on concurrent
   // mcp_servers calls, (2) Vercel Hobby caps function execution at 60s, so
   // we'd rather get 1-2 great answers than time out 3 mediocre ones.
-  // Cap to the first 4 questions so we never run more than ~4*~12s = 48s.
-  const QUESTION_BUDGET = 4;
+  // Cap to the first 2 questions to comfortably fit in Vercel Hobby's 60s
+  // function cap. On Pro (300s) we could safely raise this to 5+.
+  const QUESTION_BUDGET = 2;
   const queue = identified.slice(0, QUESTION_BUDGET);
   const skipped = identified.slice(QUESTION_BUDGET);
   const answered: Array<FollowupQuestion & { mcpPrompt: string }> = [];
@@ -199,6 +203,9 @@ export async function POST(
     },
   });
 
+  console.log(
+    `[followup] DONE meeting=${id} total=${Date.now() - tStart}ms email=${!!emailedAt} slack=${!!slackedAt}`,
+  );
   return NextResponse.json({
     followups: answered,
     emailSubject: subject,
