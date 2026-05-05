@@ -68,8 +68,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  if (event === "bot.status_change") {
-    await handleStatusChange(botId, payload);
+  // Recall account-level webhooks fire one event per state (bot.joining_call,
+  // bot.in_call_recording, bot.done, bot.call_ended, …). Old API also has a
+  // unified bot.status_change event — handle both.
+  if (event.startsWith("bot.") && event !== "bot.created") {
+    const code = event === "bot.status_change"
+      ? extractCode(payload)
+      : event.slice("bot.".length);
+    await handleStatusChange(botId, code);
+    console.log(`[webhook] ${event} bot=${botId} -> ${code}`);
     return NextResponse.json({ ok: true });
   }
 
@@ -274,12 +281,17 @@ function appendTurns(prev: ConversationTurn[], next: ConversationTurn[]) {
   return combined.slice(-MAX_HISTORY_MESSAGES);
 }
 
-async function handleStatusChange(botId: string, payload: RecallEvent) {
+function extractCode(payload: RecallEvent): string | undefined {
   const inner = payload.data;
-  const code =
-    typeof (inner.code as string | undefined) === "string"
-      ? (inner.code as string)
-      : ((inner.status as Record<string, unknown> | undefined)?.code as string | undefined);
+  if (typeof (inner.code as string | undefined) === "string") {
+    return inner.code as string;
+  }
+  const status = inner.status as Record<string, unknown> | undefined;
+  if (status && typeof status.code === "string") return status.code as string;
+  return undefined;
+}
+
+async function handleStatusChange(botId: string, code: string | undefined) {
   if (!code) return;
 
   const friendly = IN_CALL_CODES.has(code)
@@ -298,7 +310,6 @@ async function handleStatusChange(botId: string, payload: RecallEvent) {
       ...(TERMINAL_CODES.has(code) ? { endedAt: new Date() } : {}),
     },
   });
-  console.log(`[webhook] status_change bot=${botId} code=${code} -> ${friendly}`);
 
   if (TERMINAL_CODES.has(code)) {
     after(() => triggerAutoFollowup(meeting.id));
