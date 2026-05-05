@@ -63,6 +63,12 @@ model Meeting {
   followupEmailedAt  DateTime?
   followupSlackedAt  DateTime?
   followupAttempted  Boolean    @default(false)
+  // In-call state, persisted so we work on Vercel (serverless = no shared mem)
+  welcomed       Boolean    @default(false)
+  armedUntil     DateTime?
+  lastTriggerAt  DateTime?
+  // Per-bot conversation history for follow-up question context
+  conversation   String?    // JSON: [{role:"user"|"assistant", content:string}]
   questions     Question[]
 }
 

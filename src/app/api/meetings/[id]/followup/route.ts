@@ -11,6 +11,10 @@ import { readConnection } from "@/lib/connection";
 import { sendFollowupEmail } from "@/lib/email";
 import { dmAuthedUser, dmUserByEmail } from "@/lib/slack";
 
+// Followup pipeline: 30-90s of MCP queries + Resend + Slack send.
+// Vercel Hobby caps at 60s, Pro at 300s. We declare 300 here for headroom.
+export const maxDuration = 300;
+
 export async function POST(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> },

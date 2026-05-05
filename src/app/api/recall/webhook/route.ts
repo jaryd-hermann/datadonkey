@@ -1,44 +1,53 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
 import { askDataTool } from "@/lib/anthropic";
 import { sendChatMessage } from "@/lib/recall";
 import { detectWakeWord } from "@/lib/wakeword";
-import {
-  appendUtterance,
-  arm,
-  debounce,
-  disarm,
-  isArmed,
-  shouldThrottle,
-} from "@/lib/transcripts";
-import { appendTurn, getHistory } from "@/lib/conversations";
 import { readConnection } from "@/lib/connection";
 
-// Recall sends real-time events here (transcripts + bot status). We must
-// respond quickly (<1s); slow work happens in fire-and-forget async tasks.
+// Stateless webhook handler designed for Vercel:
+// - All cross-request state (welcome dedup, armed, throttle, conversation) is
+//   on the Meeting row, not in process memory.
+// - Long async work (sendChatMessage + askDataTool) is run via `after()`
+//   so the webhook response returns fast (Recall expects <1s), but the
+//   work is preserved by the platform until completion.
+// - Recall account-level webhooks deliver `bot.status_change` events to
+//   this same endpoint; we use them to update Meeting.status and trigger
+//   the auto-followup pipeline when a call ends.
+
+export const maxDuration = 60;
 
 interface RecallEvent {
   event: string;
   data: {
     bot?: { id: string };
-    // Recall's transcript.data event nests the actual words + participant
-    // info under data.data, with data.transcript holding metadata only.
     data?: Record<string, unknown>;
     transcript?: Record<string, unknown>;
     [k: string]: unknown;
   };
 }
 
-import { isWelcomed, markWelcomed } from "@/lib/welcome";
+const TRIGGER_COOLDOWN_MS = 4_000;
+const ARM_WINDOW_MS = 12_000;
+const MAX_HISTORY_MESSAGES = 8; // 4 Q&A pairs
+const HISTORY_TTL_MS = 5 * 60_000;
+const TERMINAL_CODES = new Set(["done", "fatal", "call_ended"]);
+const IN_CALL_CODES = new Set(["in_call_recording", "in_call_not_recording"]);
 
-function welcomeMessage(brand: string): string {
-  return (
-    `👋 Hi, I'm DataDonkey, your data analyst. Say "Hey ${brand}, …" clearly and I'll look up data for you.\n` +
-    `Try: "Hey ${brand}, how many users this week?" or "what dashboards do we have?"` +
-    (process.env.DEEPGRAM_API_KEY
-      ? ""
-      : `\n(tip: turn on captions in your meeting so I can hear you)`)
-  );
+interface ConversationTurn { role: "user" | "assistant"; content: string; ts: number }
+
+function welcomeMessage(brand: string, prefLive: boolean, prefFollowup: boolean): string {
+  const lines = [`👋 Hi, I'm DataDonkey, your data analyst.`];
+  if (prefLive) {
+    lines.push(`Say "Hey ${brand}, …" clearly and I'll answer in chat. Try: "Hey ${brand}, how many users this week?"`);
+  }
+  if (prefFollowup) {
+    lines.push(`After this call, I'll send you a follow-up with any data points worth knowing.`);
+  }
+  if (!process.env.DEEPGRAM_API_KEY) {
+    lines.push(`(tip: turn on captions in your meeting so I can hear you)`);
+  }
+  return lines.join("\n");
 }
 
 function ackNoQuestion(brand: string): string {
@@ -56,29 +65,49 @@ export async function POST(req: NextRequest) {
   const event = payload.event;
   const botId = payload.data?.bot?.id;
   if (!event || !botId) {
-    console.log("[webhook] missing event/bot id; keys:", Object.keys(payload?.data ?? {}));
+    return NextResponse.json({ ok: true });
+  }
+
+  if (event === "bot.status_change") {
+    await handleStatusChange(botId, payload);
     return NextResponse.json({ ok: true });
   }
 
   if (event !== "transcript.data") {
-    console.log(`[webhook] ${event} bot=${botId}`);
+    console.log(`[webhook] ${event} bot=${botId} (ignored)`);
     return NextResponse.json({ ok: true });
   }
 
   const conn = await readConnection();
   const provider = conn.provider;
 
-  // First time we see any transcript chunk for this bot, send the welcome
-  // message. (Recall's bot.status_change events aren't allowed on realtime
-  // endpoints, so this is the cheapest reliable trigger.)
-  if (!isWelcomed(botId)) {
-    markWelcomed(botId);
-    void sendChatMessage(botId, welcomeMessage(provider.name));
-    console.log(`[webhook] bot=${botId} welcomed (${provider.name})`);
+  // First time we see any transcript chunk for this bot, send the welcome.
+  // Welcome state is persisted on Meeting.welcomed so this is safe across
+  // serverless invocations.
+  const meeting = await prisma.meeting.findUnique({
+    where: { recallBotId: botId },
+  });
+  if (!meeting) {
+    return NextResponse.json({ ok: true });
+  }
+  if (!meeting.welcomed) {
+    await prisma.meeting.update({
+      where: { id: meeting.id },
+      data: { welcomed: true, status: meeting.status === "joining" ? "in_call" : meeting.status },
+    });
+    after(async () => {
+      try {
+        await sendChatMessage(
+          botId,
+          welcomeMessage(provider.name, conn.prefLive, conn.prefFollowup),
+        );
+      } catch (e) {
+        console.error("[webhook] welcome failed:", e);
+      }
+    });
   }
 
-  // Recall's transcript.data payload is double-nested: data.data holds the
-  // words + participant, while data.transcript is just metadata.
+  // Recall's transcript.data payload is double-nested.
   const inner = (payload.data.data ?? payload.data.transcript) as
     | Record<string, unknown>
     | undefined;
@@ -90,129 +119,133 @@ export async function POST(req: NextRequest) {
     .trim();
   const participant = inner?.participant as Record<string, unknown> | undefined;
   const speaker =
-    (typeof participant?.name === "string" ? (participant.name as string) : null) ??
-    null;
+    typeof participant?.name === "string" ? (participant.name as string) : null;
 
   if (!text) return NextResponse.json({ ok: true });
 
   console.log(`[webhook] bot=${botId} speaker=${speaker} text="${text}"`);
-  appendUtterance(botId, { speaker, text, ts: Date.now() });
 
-  // Persist to DB as we go so the meeting detail page can show a live
-  // transcript without depending on Recall's post-call /transcript endpoint.
-  void persistUtterance(botId, speaker, text);
+  // Persist the utterance immediately (transcript + participants).
+  await persistUtterance(meeting.id, speaker, text);
 
-  const match = detectWakeWord(text, provider);
-
-  // Path 1: wake word detected in this utterance
-  if (match) {
-    if (shouldThrottle(botId)) {
-      console.log(`[webhook] bot=${botId} throttled`);
-      return NextResponse.json({ ok: true });
-    }
-
-    if (match.question.length < 3) {
-      // Just the wake word, no question yet. Ack and wait for the next
-      // utterance to be the question.
-      arm(botId);
-      void sendChatMessage(botId, ackNoQuestion(provider.name));
-      console.log(`[webhook] bot=${botId} armed (wake word, no question)`);
-      return NextResponse.json({ ok: true });
-    }
-
-    // Wake word + question in one utterance — fire after a short debounce.
-    disarm(botId);
-    debounce(botId, 1_200, () => {
-      void handleQuestion(botId, match.question, speaker);
-    });
+  if (!conn.prefLive) {
+    // Live Q&A is off — we're only buffering the transcript for follow-up.
     return NextResponse.json({ ok: true });
   }
 
-  // Path 2: no wake word, but the bot is armed (we heard wake word in a
-  // recent prior utterance). Treat this utterance as the question.
-  if (isArmed(botId)) {
-    disarm(botId);
-    if (shouldThrottle(botId)) return NextResponse.json({ ok: true });
-    console.log(`[webhook] bot=${botId} armed-question="${text}"`);
-    debounce(botId, 1_200, () => {
-      void handleQuestion(botId, text, speaker);
+  const match = detectWakeWord(text, provider);
+  const now = new Date();
+  const fresh = await prisma.meeting.findUnique({ where: { id: meeting.id } });
+  if (!fresh) return NextResponse.json({ ok: true });
+  const armed = fresh.armedUntil ? fresh.armedUntil.getTime() > now.getTime() : false;
+  const throttled = fresh.lastTriggerAt
+    ? now.getTime() - fresh.lastTriggerAt.getTime() < TRIGGER_COOLDOWN_MS
+    : false;
+
+  // Path 1: wake word in this utterance
+  if (match) {
+    if (throttled) {
+      console.log(`[webhook] bot=${botId} throttled`);
+      return NextResponse.json({ ok: true });
+    }
+    if (match.question.length < 3) {
+      await prisma.meeting.update({
+        where: { id: meeting.id },
+        data: { armedUntil: new Date(now.getTime() + ARM_WINDOW_MS) },
+      });
+      after(async () => {
+        try { await sendChatMessage(botId, ackNoQuestion(provider.name)); } catch {}
+      });
+      return NextResponse.json({ ok: true });
+    }
+    await prisma.meeting.update({
+      where: { id: meeting.id },
+      data: { armedUntil: null, lastTriggerAt: now },
     });
+    after(() => handleQuestion(botId, meeting.id, match.question, speaker));
+    return NextResponse.json({ ok: true });
+  }
+
+  // Path 2: armed -> treat this utterance as the question
+  if (armed) {
+    if (throttled) return NextResponse.json({ ok: true });
+    await prisma.meeting.update({
+      where: { id: meeting.id },
+      data: { armedUntil: null, lastTriggerAt: now },
+    });
+    after(() => handleQuestion(botId, meeting.id, text, speaker));
   }
 
   return NextResponse.json({ ok: true });
 }
 
 async function persistUtterance(
-  botId: string,
+  meetingId: string,
   speaker: string | null,
   text: string,
 ) {
   try {
-    const meeting = await prisma.meeting.findUnique({
-      where: { recallBotId: botId },
-    });
-    if (!meeting) return;
-
+    const m = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!m) return;
     const line = `${speaker ?? "?"}: ${text}`;
-    const transcript = meeting.transcript ? `${meeting.transcript}\n${line}` : line;
+    const transcript = m.transcript ? `${m.transcript}\n${line}` : line;
 
     let participants: Array<{ name: string; email?: string | null }> = [];
-    if (meeting.participants) {
-      try {
-        participants = JSON.parse(meeting.participants);
-      } catch {
-        // ignore
-      }
+    if (m.participants) {
+      try { participants = JSON.parse(m.participants); } catch {}
     }
     if (speaker && !participants.some((p) => p.name === speaker)) {
       participants.push({ name: speaker });
     }
-
     await prisma.meeting.update({
-      where: { id: meeting.id },
-      data: {
-        transcript,
-        participants: JSON.stringify(participants),
-      },
+      where: { id: meetingId },
+      data: { transcript, participants: JSON.stringify(participants) },
     });
   } catch (err) {
     console.error("[webhook] persistUtterance failed:", err);
   }
 }
 
-async function handleQuestion(botId: string, question: string, speaker: string | null) {
+async function handleQuestion(
+  botId: string,
+  meetingId: string,
+  question: string,
+  speaker: string | null,
+) {
   const t0 = Date.now();
   console.log(`[wake] bot=${botId} q="${question}"`);
 
-  const meeting = await prisma.meeting.findUnique({ where: { recallBotId: botId } });
+  const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
   const conn = await readConnection();
-  if (!meeting || !conn.exists) {
-    console.error(`[wake] no meeting or connection for bot=${botId}`);
-    return;
-  }
+  if (!meeting || !conn.exists) return;
 
-  // Stall: ack + "looking that up" in a single message.
-  void sendChatMessage(botId, "👀 looking that up…");
+  try { await sendChatMessage(botId, "👀 looking that up…"); } catch {}
 
-  const history = getHistory(botId);
+  const history = readHistory(meeting.conversation);
   let answer: string;
   try {
     const result = await askDataTool(
       question,
       conn.provider,
       conn.credentials,
-      history,
+      history.map(({ role, content }) => ({ role, content })),
     );
     answer = result.answer || "(no response)";
   } catch (err) {
-    console.error(`[wake] askDataTool failed:`, err);
+    console.error("[wake] askDataTool failed:", err);
     answer = `Sorry, I hit an error querying ${conn.provider.name}.`;
   }
 
-  await sendChatMessage(botId, answer);
-  // Save this turn so a follow-up "Hey PostHog" within 5min has context.
-  appendTurn(botId, "user", question);
-  appendTurn(botId, "assistant", answer);
+  try { await sendChatMessage(botId, answer); } catch {}
+
+  const newHistory = appendTurns(history, [
+    { role: "user", content: question, ts: Date.now() },
+    { role: "assistant", content: answer, ts: Date.now() },
+  ]);
+  await prisma.meeting.update({
+    where: { id: meeting.id },
+    data: { conversation: JSON.stringify(newHistory) },
+  });
   await prisma.question.create({
     data: {
       meetingId: meeting.id,
@@ -222,7 +255,71 @@ async function handleQuestion(botId: string, question: string, speaker: string |
       latencyMs: Date.now() - t0,
     },
   });
-  console.log(`[wake] bot=${botId} answered in ${Date.now() - t0}ms (history=${history.length} turns)`);
+  console.log(`[wake] bot=${botId} answered in ${Date.now() - t0}ms`);
+}
+
+function readHistory(json: string | null): ConversationTurn[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as ConversationTurn[];
+    const cutoff = Date.now() - HISTORY_TTL_MS;
+    return parsed.filter((t) => (t.ts ?? 0) >= cutoff);
+  } catch {
+    return [];
+  }
+}
+
+function appendTurns(prev: ConversationTurn[], next: ConversationTurn[]) {
+  const combined = [...prev, ...next];
+  return combined.slice(-MAX_HISTORY_MESSAGES);
+}
+
+async function handleStatusChange(botId: string, payload: RecallEvent) {
+  const inner = payload.data;
+  const code =
+    typeof (inner.code as string | undefined) === "string"
+      ? (inner.code as string)
+      : ((inner.status as Record<string, unknown> | undefined)?.code as string | undefined);
+  if (!code) return;
+
+  const friendly = IN_CALL_CODES.has(code)
+    ? "in_call"
+    : TERMINAL_CODES.has(code)
+      ? "done"
+      : code;
+
+  const meeting = await prisma.meeting.findUnique({ where: { recallBotId: botId } });
+  if (!meeting) return;
+
+  await prisma.meeting.update({
+    where: { id: meeting.id },
+    data: {
+      status: friendly,
+      ...(TERMINAL_CODES.has(code) ? { endedAt: new Date() } : {}),
+    },
+  });
+  console.log(`[webhook] status_change bot=${botId} code=${code} -> ${friendly}`);
+
+  if (TERMINAL_CODES.has(code)) {
+    after(() => triggerAutoFollowup(meeting.id));
+  }
+}
+
+async function triggerAutoFollowup(meetingId: string) {
+  try {
+    // Give Recall a moment to flush any final transcript chunks.
+    await new Promise((r) => setTimeout(r, 8_000));
+    const conn = await prisma.connection.findUnique({ where: { id: "default" } });
+    if (!conn?.prefFollowup) return;
+    const m = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!m || m.followupAttempted) return;
+    if (!m.transcript || !m.transcript.trim()) return;
+    const origin = process.env.APP_URL ?? "http://localhost:3000";
+    const r = await fetch(`${origin}/api/meetings/${meetingId}/followup`, { method: "POST" });
+    if (!r.ok) console.warn("[auto-followup] failed", await r.text());
+  } catch (err) {
+    console.error("[auto-followup] error:", err);
+  }
 }
 
 export async function GET() {
