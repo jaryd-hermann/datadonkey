@@ -244,14 +244,29 @@ Answer it now using the data, with footnotes for the events and date ranges you 
   // analyst writes ~150-300 words plus does 2-5 tool calls, so we need a
   // generous output budget (each tool call eats tokens too). 6000 is plenty
   // for the typical case while leaving headroom.
-  const res = await anthropic.beta.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 6000,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-    mcp_servers: [mcpServer],
-    betas: ["mcp-client-2025-04-04"],
-  });
+  //
+  // Hard 60s timeout per question. The MCP can occasionally hang (PostHog
+  // MCP backed tool call sometimes never returns). Without this, a single
+  // hung call silently consumes the entire 300s function budget and leaves
+  // the pipeline stuck with no final state written.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 60_000);
+  let res;
+  try {
+    res = await anthropic.beta.messages.create(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 6000,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+        mcp_servers: [mcpServer],
+        betas: ["mcp-client-2025-04-04"],
+      },
+      { signal: ac.signal },
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
   const textParts: string[] = [];
   const toolCalls: AskPostHogResult["toolCalls"] = [];

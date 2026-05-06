@@ -16,10 +16,11 @@ import { setStage } from "@/lib/pipeline";
 export const maxDuration = 300;
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const force = new URL(req.url).searchParams.get("force") === "1";
   const meeting = await prisma.meeting.findUnique({ where: { id } });
   if (!meeting) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -37,15 +38,40 @@ export async function POST(
       { status: 400 },
     );
   }
+  if (meeting.followupAttempted && !force && meeting.followupReport) {
+    return NextResponse.json(
+      { error: "already generated. Add ?force=1 to re-run." },
+      { status: 409 },
+    );
+  }
 
+  // Wrap the entire pipeline in try/finally so we always write a terminal
+  // stage even if a downstream call hangs/throws and Vercel kills us at
+  // the function timeout. Without this, a single bad call leaves the
+  // meeting stuck in pipelineStage="querying" forever.
+  try {
+    return await runFollowup(meeting, conn);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[followup] FATAL meeting=${id}:`, msg);
+    await setStage(id, "failed", msg.slice(0, 200)).catch(() => {});
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+async function runFollowup(
+  meeting: NonNullable<Awaited<ReturnType<typeof prisma.meeting.findUnique>>>,
+  conn: Awaited<ReturnType<typeof readConnection>>,
+) {
+  const id = meeting.id;
   const tStart = Date.now();
-  console.log(`[followup] START meeting=${id} transcript=${meeting.transcript.length}c`);
+  console.log(`[followup] START meeting=${id} transcript=${meeting.transcript!.length}c`);
   await prisma.meeting.update({ where: { id }, data: { followupAttempted: true } });
 
   // Step 1: identify questions worth answering
   await setStage(id, "reviewing");
   await setStage(id, "analyzing");
-  const identified = await analyzeTranscript(meeting.transcript);
+  const identified = await analyzeTranscript(meeting.transcript ?? "");
   console.log(`[followup] analyzed in ${Date.now() - tStart}ms -> ${identified.length} questions`);
 
   if (identified.length === 0) {

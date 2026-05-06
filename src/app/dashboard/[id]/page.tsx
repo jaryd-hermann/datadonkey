@@ -69,10 +69,13 @@ export default function MeetingDetail({
     return () => clearInterval(t);
   }, [id]);
 
-  async function generate() {
+  async function generate(force = false) {
     setRunning(true);
     setError(null);
-    const r = await fetch(`/api/meetings/${id}/followup`, { method: "POST" });
+    const url = force
+      ? `/api/meetings/${id}/followup?force=1`
+      : `/api/meetings/${id}/followup`;
+    const r = await fetch(url, { method: "POST" });
     const j = await r.json();
     setRunning(false);
     if (!r.ok) {
@@ -161,13 +164,24 @@ export default function MeetingDetail({
                 and drafts a follow-up email. Takes ~30–60s.
               </p>
             </div>
-            <button
-              onClick={generate}
-              disabled={!canGenerate}
-              className="shrink-0 rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-            >
-              {inflight ? "Working…" : ranOnce ? "Re-generate" : "Generate"}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                onClick={() => generate(false)}
+                disabled={!canGenerate}
+                className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
+              >
+                {inflight ? "Working…" : ranOnce ? "Re-generate" : "Generate"}
+              </button>
+              {inflight && !running && (
+                <button
+                  onClick={() => generate(true)}
+                  className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200"
+                  title="The previous run never finished. Click to start fresh."
+                >
+                  Looks stuck — force re-run
+                </button>
+              )}
+            </div>
           </div>
           {!transcriptReady && !running && (
             <div className="mt-4 rounded-md bg-zinc-50 px-3 py-3 text-xs text-zinc-500 dark:bg-zinc-950">
