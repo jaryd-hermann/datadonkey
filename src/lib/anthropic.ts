@@ -319,10 +319,19 @@ export function extractPostHogUrls(text: string): string[] {
 export async function analyzeTranscript(transcript: string): Promise<FollowupQuestion[]> {
   if (!transcript.trim()) return [];
 
-  const res = await anthropic.messages.create({
-    model: "claude-opus-4-5",
-    max_tokens: 4096,
-    system: `You read meeting transcripts and surface concrete data questions
+  // Hard 45s timeout. Without this, an Anthropic outage / retry loop can
+  // silently consume the entire 300s function budget.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 45_000);
+
+  let res;
+  try {
+    res = await anthropic.messages.create(
+      {
+        // Sonnet is plenty for JSON extraction and 3-5x faster than Opus.
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        system: `You read meeting transcripts and surface concrete data questions
 that the team would benefit from having answered with PostHog analytics.
 
 Rules:
@@ -337,8 +346,17 @@ Rules:
 - Return ONLY a JSON array. No prose, no code fences.
 
 Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence why this came up in the meeting>"}]`,
-    messages: [{ role: "user", content: transcript }],
-  });
+        messages: [{ role: "user", content: transcript }],
+      },
+      { signal: ac.signal },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[analyzeTranscript] failed:", msg);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 
   const text = res.content
     .filter((b) => b.type === "text")
@@ -392,7 +410,7 @@ Questions and answers from PostHog:
 ${qaBlock}`;
 
   const res = await anthropic.messages.create({
-    model: "claude-opus-4-5",
+    model: "claude-opus-4-7",
     max_tokens: 1500,
     system: `You draft a brief, actionable follow-up email to participants of a meeting where data-shaped questions came up.
 
