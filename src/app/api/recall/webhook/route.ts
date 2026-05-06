@@ -68,16 +68,46 @@ function ackNoQuestion(brand: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  // We always return 200 for parseable Recall webhooks, even when our handlers
+  // throw — Recall disables a realtime endpoint after enough non-2xx responses
+  // (we hit `realtime_endpoint.failed` once during a brief 500 window when env
+  // vars were missing). Errors are surfaced via console.error and the
+  // per-minute reconciliation cron acts as a safety net.
+  try {
+    return await processEvent(req);
+  } catch (err) {
+    console.error("[webhook] processing failed (returning 200 to keep endpoint alive):", err);
+    return NextResponse.json({ ok: true, swallowed: String(err) });
+  }
+}
+
+async function processEvent(req: NextRequest): Promise<NextResponse> {
   let payload: RecallEvent;
   try {
     payload = (await req.json()) as RecallEvent;
   } catch {
-    return NextResponse.json({ ok: false, error: "bad json" }, { status: 400 });
+    // Even on bad JSON, return 200 so Recall doesn't disable us.
+    return NextResponse.json({ ok: true, error: "bad json" });
   }
 
   const event = payload.event;
   const botId = payload.data?.bot?.id;
-  if (!event || !botId) {
+  if (!event) {
+    return NextResponse.json({ ok: true });
+  }
+
+  // Recall warns us when our endpoint has been failing — log it loudly so
+  // we know to investigate. (At this point Recall has already disabled the
+  // endpoint for that bot; the cron reconciles status from here on.)
+  if (event === "realtime_endpoint.failed") {
+    const data = payload.data?.data as Record<string, unknown> | undefined;
+    console.warn(
+      `[webhook] realtime_endpoint.failed bot=${botId ?? "?"} code=${data?.code} sub=${data?.sub_code}`,
+    );
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!botId) {
     return NextResponse.json({ ok: true });
   }
 
