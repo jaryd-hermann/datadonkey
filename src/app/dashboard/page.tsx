@@ -491,23 +491,11 @@ function HowItWorks({ providerName }: { providerName: string }) {
 }
 
 function PlatformIcons() {
-  // Official multi-color brand marks via Wikipedia commons (stable hot-link).
+  // Official multi-color brand marks served from /public.
   const icons: { src: string; alt: string; tooltip: string }[] = [
-    {
-      src: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9b/Google_Meet_icon_%282020%29.svg/512px-Google_Meet_icon_%282020%29.svg.png",
-      alt: "Google Meet",
-      tooltip: "Google Meet",
-    },
-    {
-      src: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Microsoft_Office_Teams_%282018%E2%80%93present%29.svg/512px-Microsoft_Office_Teams_%282018%E2%80%93present%29.svg.png",
-      alt: "Microsoft Teams",
-      tooltip: "Microsoft Teams",
-    },
-    {
-      src: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Zoom_Communications_Logo.svg/512px-Zoom_Communications_Logo.svg.png",
-      alt: "Zoom",
-      tooltip: "Zoom",
-    },
+    { src: "/meet-icon.svg", alt: "Google Meet", tooltip: "Google Meet" },
+    { src: "/teams-icon.svg", alt: "Microsoft Teams", tooltip: "Microsoft Teams" },
+    { src: "/zoom-icon.svg", alt: "Zoom", tooltip: "Zoom" },
   ];
   return (
     <span className="inline-flex items-center gap-2">
