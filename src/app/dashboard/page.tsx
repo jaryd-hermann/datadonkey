@@ -861,15 +861,13 @@ function MeetingCard({ m }: { m: Meeting }) {
         <StatusBadge meeting={m} />
       </div>
 
-      {m.pipelineStage && (
-        <div className="mt-2">
-          <PipelineTimeline
-            stages={parsePipelineStages(m.pipelineStages)}
-            currentStage={m.pipelineStage}
-            size="sm"
-          />
-        </div>
-      )}
+      <div className="mt-2">
+        <PipelineTimeline
+          stages={parsePipelineStages(m.pipelineStages)}
+          currentStage={derivePipelineStage(m)}
+          size="sm"
+        />
+      </div>
 
       {m.questions.length > 0 && (
         <ul className="mt-3 space-y-2 border-t border-stone-100 pt-3 dark:border-stone-800">
@@ -1340,10 +1338,14 @@ function PipelineBanner({
   // Pick the most relevant meeting for the banner: in-call > pipeline-active > nothing
   const active = pickActiveMeeting(meetings);
   if (!active) return null;
-  const isLive = active.status === "in_call" || active.pipelineStage === "listening";
+  const derived = derivePipelineStage(active) ?? active.pipelineStage;
+  const isLive =
+    active.status === "in_call" ||
+    active.status === "joining" ||
+    derived === "listening";
   const isProcessing =
-    !isLive && !!active.pipelineStage && active.pipelineStage !== "done" && active.pipelineStage !== "failed";
-  const isDone = active.pipelineStage === "done" || active.pipelineStage === "failed";
+    !isLive && !!derived && derived !== "done" && derived !== "failed";
+  const isDone = derived === "done" || derived === "failed";
   if (isDone && active.pipelineDismissed) return null;
 
   const participants = parseParticipants(active.participants);
@@ -1401,10 +1403,8 @@ function PipelineBanner({
                 </span>
               )}
               {isLive && <LiveDuration startedAt={active.createdAt} />}
-              {isProcessing && active.pipelineStageAt && (
-                <span>
-                  {STAGE_DESCS[active.pipelineStage ?? ""] ?? "Working…"}
-                </span>
+              {isProcessing && (
+                <span>{STAGE_DESCS[derived ?? ""] ?? "Working…"}</span>
               )}
             </div>
           )}
@@ -1435,7 +1435,7 @@ function PipelineBanner({
 
       <PipelineTimeline
         stages={parsePipelineStages(active.pipelineStages)}
-        currentStage={active.pipelineStage}
+        currentStage={derived}
         size="lg"
       />
     </motion.div>
@@ -1445,7 +1445,10 @@ function PipelineBanner({
 function pickActiveMeeting(meetings: Meeting[]): Meeting | null {
   // Priority: in-call > processing > most recent done (un-dismissed)
   const inCall = meetings.find(
-    (m) => m.status === "in_call" || m.pipelineStage === "listening",
+    (m) =>
+      m.status === "in_call" ||
+      m.status === "joining" ||
+      m.pipelineStage === "listening",
   );
   if (inCall) return inCall;
   const processing = meetings.find(
@@ -1484,6 +1487,7 @@ function PipelineTimeline({
   const seen = new Map<string, PipelineEntry>();
   for (const s of stages) seen.set(s.stage, s);
   const cur = currentStage ?? stages[stages.length - 1]?.stage ?? null;
+  const curIdx = cur ? (PIPELINE_STAGES as readonly string[]).indexOf(cur) : -1;
 
   const lineStyle = size === "lg" ? "py-4" : "py-2";
   const iconStyle = size === "lg" ? "h-7 w-7 text-xs" : "h-5 w-5 text-[10px]";
@@ -1494,7 +1498,10 @@ function PipelineTimeline({
       <div className="flex items-center gap-1 sm:gap-2">
         {PIPELINE_STAGES.map((s, i) => {
           const entry = seen.get(s);
-          const reached = !!entry;
+          // Stage counts as "reached" if we have a logged entry for it,
+          // OR if cur is set and this stage's index is at or before it
+          // (so we render correctly even when stage history is sparse).
+          const reached = !!entry || (curIdx >= 0 && i <= curIdx);
           const isCurrent = cur === s && s !== "done";
           const isFuture = !reached;
           return (
@@ -1547,7 +1554,7 @@ function PipelineTimeline({
               {i < PIPELINE_STAGES.length - 1 && (
                 <div
                   className={`h-0.5 flex-1 rounded-full ${
-                    reached && !isFuture && cur && (PIPELINE_STAGES as readonly string[]).indexOf(cur) > i
+                    curIdx > i
                       ? "bg-emerald-400/70 dark:bg-emerald-500/60"
                       : reached
                         ? "bg-emerald-300 dark:bg-emerald-600"
@@ -1561,6 +1568,18 @@ function PipelineTimeline({
       </div>
     </div>
   );
+}
+
+// Best-effort current stage when the pipelineStage column is stale or
+// missing — derive from the meeting status so the timeline still shows
+// something meaningful.
+function derivePipelineStage(m: Meeting): string | null {
+  if (m.pipelineStage) return m.pipelineStage;
+  if (m.status === "joining" || m.status === "in_call") return "listening";
+  if (m.status === "done" || m.status === "call_ended" || m.status === "fatal") {
+    return m.followupReport ? "done" : m.followupAttempted ? "delivering" : "reviewing";
+  }
+  return null;
 }
 
 function parsePipelineStages(json: string | null): PipelineEntry[] {
