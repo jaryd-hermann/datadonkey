@@ -1503,7 +1503,7 @@ function PipelineTimeline({
                 <div
                   className={`relative flex shrink-0 items-center justify-center rounded-full font-semibold ${iconStyle} ${
                     isCurrent
-                      ? "bg-orange-600 text-white shadow-md"
+                      ? "border-2 border-orange-500 bg-white text-orange-600 dark:border-orange-400 dark:bg-stone-950 dark:text-orange-300"
                       : reached
                         ? "bg-emerald-500 text-white"
                         : "border border-stone-300 bg-white text-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-600"
@@ -1513,7 +1513,7 @@ function PipelineTimeline({
                     <motion.span
                       animate={{ rotate: 360 }}
                       transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
-                      className="inline-block"
+                      className="inline-block leading-none"
                     >
                       ◐
                     </motion.span>
@@ -1524,9 +1524,9 @@ function PipelineTimeline({
                   )}
                   {isCurrent && (
                     <motion.span
-                      animate={{ scale: [1, 1.6], opacity: [0.6, 0] }}
+                      animate={{ scale: [1, 1.7], opacity: [0.5, 0] }}
                       transition={{ duration: 1.6, repeat: Infinity }}
-                      className="absolute inset-0 rounded-full bg-orange-500/40"
+                      className="absolute inset-0 rounded-full ring-2 ring-orange-400/60"
                     />
                   )}
                 </div>

@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/calendar-sync",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/reconcile-bots",
+      "schedule": "*/1 * * * *"
     }
   ]
 }
