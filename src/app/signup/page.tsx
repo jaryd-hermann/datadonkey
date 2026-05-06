@@ -3,8 +3,22 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
+import confetti from "canvas-confetti";
 import { AppShell } from "@/components/AppShell";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+
+// Fires confetti from the four corners — used to celebrate completing a
+// concrete connection (tool, calendar, slack).
+function celebrate() {
+  if (typeof window === "undefined") return;
+  const colors = ["#EA580C", "#F59E0B", "#FBBF24", "#10B981", "#3B82F6"];
+  const common = { particleCount: 60, spread: 70, startVelocity: 45, colors, ticks: 200 };
+  // Each corner shoots inward
+  confetti({ ...common, origin: { x: 0, y: 0 }, angle: -45 });
+  confetti({ ...common, origin: { x: 1, y: 0 }, angle: 225 });
+  confetti({ ...common, origin: { x: 0, y: 1 }, angle: 45 });
+  confetti({ ...common, origin: { x: 1, y: 1 }, angle: 135 });
+}
 
 type StepId = "auth" | "tool" | "preferences" | "calendar" | "slack";
 
@@ -47,6 +61,7 @@ interface ProviderShape {
 export default function Signup() {
   const router = useRouter();
   const [stepIdx, setStepIdx] = useState(0);
+  const [maxStep, setMaxStep] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
   const step = STEPS[stepIdx].id;
 
@@ -104,9 +119,11 @@ export default function Signup() {
       else if (u.email) setEmail(u.email);
 
       if (j.signedUp) {
-        // Already onboarded — pick up wherever they left off.
-        if (j.connected) setStepIdx(2);
-        else setStepIdx(1);
+        // Authed + name/company saved — start at the data tool step.
+        // We always land on tool (step 1) rather than auto-skipping past it,
+        // so the user sees the connected provider and can verify before moving on.
+        setStepIdx(1);
+        setMaxStep((m) => Math.max(m, 1));
       }
       // If authed but not signedUp, stay on step 0 so they enter company.
       // The Continue with Google button will short-circuit since they're
@@ -151,6 +168,15 @@ export default function Signup() {
     if (next === stepIdx) return;
     setDirection(delta > 0 ? 1 : -1);
     setStepIdx(next);
+    setMaxStep((m) => Math.max(m, next));
+    setError(null);
+  }
+
+  function jumpTo(target: number) {
+    if (target === stepIdx) return;
+    if (target > maxStep) return; // can't skip ahead past unfinished work
+    setDirection(target > stepIdx ? 1 : -1);
+    setStepIdx(target);
     setError(null);
   }
 
@@ -238,6 +264,7 @@ export default function Signup() {
     // creds for now — mock OAuth — and skip credential validation. They can
     // fill in real creds later from the dashboard.
     if (method === "sso") {
+      celebrate();
       go(1);
       return;
     }
@@ -254,6 +281,7 @@ export default function Signup() {
       setError(j.error ?? "Failed");
       return;
     }
+    celebrate();
     go(1);
   }
 
@@ -290,6 +318,7 @@ export default function Signup() {
       }),
     });
     setBusy(false);
+    if (!skip && calendarConnected) celebrate();
     go(1);
   }
 
@@ -305,6 +334,11 @@ export default function Signup() {
       }),
     });
     setBusy(false);
+    if (!skip && slackConnected) {
+      celebrate();
+      // Brief pause so the user sees the confetti before we navigate.
+      await new Promise((r) => setTimeout(r, 700));
+    }
     router.push("/dashboard");
   }
 
@@ -314,7 +348,7 @@ export default function Signup() {
     <AppShell>
       <div className="mx-auto max-w-6xl px-6 py-10">
         {/* Step indicator */}
-        <ProgressDots stepIdx={stepIdx} />
+        <ProgressDots stepIdx={stepIdx} maxStep={maxStep} onJump={jumpTo} />
 
         <div className="mt-10 grid gap-12 md:grid-cols-2">
           {/* LEFT: action */}
@@ -432,34 +466,61 @@ export default function Signup() {
   );
 }
 
-function ProgressDots({ stepIdx }: { stepIdx: number }) {
+function ProgressDots({
+  stepIdx,
+  maxStep,
+  onJump,
+}: {
+  stepIdx: number;
+  maxStep: number;
+  onJump: (i: number) => void;
+}) {
   return (
-    <div className="flex items-center gap-3">
-      {STEPS.map((s, i) => (
-        <div key={s.id} className="flex items-center gap-3">
-          <motion.div
-            animate={{
-              scale: i === stepIdx ? 1.2 : 1,
-              backgroundColor:
-                i <= stepIdx ? "rgb(28 25 23)" : "rgb(214 211 209)",
-            }}
-            transition={{ duration: 0.2 }}
-            className="h-2 w-2 rounded-full"
-          />
-          <span
-            className={`text-xs uppercase tracking-widest transition ${
-              i === stepIdx
-                ? "text-stone-900 dark:text-stone-100"
-                : "text-stone-400"
-            }`}
-          >
-            {s.label}
-          </span>
-          {i < STEPS.length - 1 && (
-            <div className="h-px w-6 bg-stone-200 dark:bg-stone-800" />
-          )}
-        </div>
-      ))}
+    <div className="flex flex-wrap items-center gap-3">
+      {STEPS.map((s, i) => {
+        const reachable = i <= maxStep;
+        const active = i === stepIdx;
+        return (
+          <div key={s.id} className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onJump(i)}
+              disabled={!reachable}
+              className={`flex items-center gap-2 rounded-full px-2 py-1 transition ${
+                reachable
+                  ? "cursor-pointer hover:bg-stone-100 dark:hover:bg-stone-800"
+                  : "cursor-not-allowed"
+              }`}
+              aria-current={active ? "step" : undefined}
+            >
+              <motion.span
+                animate={{
+                  scale: active ? 1.2 : 1,
+                  backgroundColor: i <= stepIdx
+                    ? "rgb(28 25 23)"
+                    : "rgb(214 211 209)",
+                }}
+                transition={{ duration: 0.2 }}
+                className="inline-block h-2 w-2 rounded-full"
+              />
+              <span
+                className={`text-xs uppercase tracking-widest transition ${
+                  active
+                    ? "text-stone-900 dark:text-stone-100"
+                    : reachable
+                      ? "text-stone-600 dark:text-stone-400"
+                      : "text-stone-400"
+                }`}
+              >
+                {s.label}
+              </span>
+            </button>
+            {i < STEPS.length - 1 && (
+              <div className="h-px w-6 bg-stone-200 dark:bg-stone-800" />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -723,20 +784,20 @@ function PreferencesStep(props: {
     <div>
       <h2 className="text-2xl font-semibold tracking-tight">How should I work?</h2>
       <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
-        Pick at least one. Both default on.
+        Pick at least one. Smart follows is recommended.
       </p>
-      <div className="mt-6 space-y-3">
-        <Toggle
+      <div className="mt-6 space-y-4">
+        <SmartFollowsBigCard
+          checked={props.prefFollowup}
+          onChange={() => props.setPrefFollowup(!props.prefFollowup)}
+          providerName={props.toolName}
+        />
+        <BasicPrefRow
           checked={props.prefLive}
           onChange={() => props.setPrefLive(!props.prefLive)}
           title={`"Hey ${props.toolName}" — answer live in calls`}
-          subtitle={`Anyone in the meeting can ask. Replies in chat in 5–10s.`}
-        />
-        <Toggle
-          checked={props.prefFollowup}
-          onChange={() => props.setPrefFollowup(!props.prefFollowup)}
-          title="Smart fast follows"
-          subtitle="After each call, I read the transcript, surface data questions, and email everyone the answers."
+          subtitle="Reply in chat in 5–10s when someone uses the wake word."
+          badge="Available, but not great yet"
         />
       </div>
 
@@ -751,6 +812,144 @@ function PreferencesStep(props: {
         {props.busy ? "Saving…" : "Continue"}
       </PrimaryButton>
     </div>
+  );
+}
+
+function SmartFollowsBigCard({
+  checked,
+  onChange,
+  providerName,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  providerName: string;
+}) {
+  return (
+    <div
+      className={`relative overflow-hidden rounded-xl border-2 p-5 transition ${
+        checked
+          ? "border-orange-500/50 bg-gradient-to-br from-orange-50 to-amber-50 dark:border-orange-500/30 dark:from-orange-950/20 dark:to-amber-950/10"
+          : "border-stone-200 dark:border-stone-800"
+      }`}
+    >
+      <div className="flex items-start gap-4">
+        <button
+          type="button"
+          onClick={onChange}
+          className={`mt-1 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+            checked ? "bg-orange-600" : "bg-stone-300 dark:bg-stone-700"
+          }`}
+          aria-pressed={checked}
+        >
+          <motion.span
+            animate={{ x: checked ? 22 : 2 }}
+            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            className="inline-block h-5 w-5 rounded-full bg-white shadow-md"
+          />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold text-stone-900 dark:text-stone-100">
+              Smart fast follows
+            </h3>
+            <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
+              Recommended
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-stone-700 dark:text-stone-300">
+            DataDonkey listens to your meetings and, after, sends you a private
+            briefing of the data questions that came up — answered with real
+            numbers from {providerName}.
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-stone-200 bg-white/70 p-3 dark:border-stone-800 dark:bg-stone-900/50">
+              <div className="text-xs font-semibold text-stone-900 dark:text-stone-100">
+                What it&apos;s trained on
+              </div>
+              <ul className="mt-1.5 space-y-1 text-xs text-stone-600 dark:text-stone-400">
+                <li>• Spotting data questions, asked or not</li>
+                <li>• Picking the right metric without being told</li>
+                <li>• Strategic reasoning over your event taxonomy</li>
+                <li>• Surfacing things you&apos;d miss otherwise</li>
+              </ul>
+            </div>
+            <div className="rounded-lg border border-stone-200 bg-white/70 p-3 dark:border-stone-800 dark:bg-stone-900/50">
+              <div className="text-xs font-semibold text-stone-900 dark:text-stone-100">
+                What you get
+              </div>
+              <ul className="mt-1.5 space-y-1 text-xs text-stone-600 dark:text-stone-400">
+                <li>• Email + Slack DM after each call</li>
+                <li>• Bottom-line-up-front findings</li>
+                <li>• Footnotes on events &amp; assumptions used</li>
+                <li>• Links straight to the {providerName} chart</li>
+              </ul>
+            </div>
+          </div>
+          <div className="mt-4 rounded-lg border border-dashed border-stone-300 bg-white/50 p-3 text-xs text-stone-600 dark:border-stone-700 dark:bg-stone-900/30 dark:text-stone-400">
+            <span className="font-medium text-stone-900 dark:text-stone-100">
+              Example —
+            </span>{" "}
+            you and your designer brainstorm a new onboarding flow. After the
+            call, DataDonkey digs into your funnel data and shares an actionable
+            finding: where users actually drop off today, and which step would
+            move the needle most. Helping you build something people want.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BasicPrefRow({
+  checked,
+  onChange,
+  title,
+  subtitle,
+  badge,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  title: string;
+  subtitle: string;
+  badge?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      className={`flex w-full items-start gap-4 rounded-lg border px-4 py-3 text-left transition ${
+        checked
+          ? "border-stone-900 bg-stone-100 dark:border-stone-100 dark:bg-stone-800"
+          : "border-stone-200 hover:border-stone-300 dark:border-stone-800 dark:hover:border-stone-700"
+      }`}
+    >
+      <span
+        className={`mt-1 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+          checked ? "bg-stone-900 dark:bg-stone-100" : "bg-stone-300 dark:bg-stone-700"
+        }`}
+      >
+        <motion.span
+          animate={{ x: checked ? 18 : 2 }}
+          transition={{ type: "spring", stiffness: 500, damping: 30 }}
+          className="inline-block h-4 w-4 rounded-full bg-white shadow-sm"
+        />
+      </span>
+      <span className="flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-stone-900 dark:text-stone-100">
+            {title}
+          </span>
+          {badge && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-300">
+              {badge}
+            </span>
+          )}
+        </span>
+        <span className="mt-0.5 block text-xs text-stone-600 dark:text-stone-400">
+          {subtitle}
+        </span>
+      </span>
+    </button>
   );
 }
 
