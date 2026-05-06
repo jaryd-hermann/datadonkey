@@ -126,18 +126,6 @@ function ProfileMenu({
               <div className="mt-1 truncate text-xs text-stone-500">{user.email}</div>
             )}
           </div>
-          <a
-            href={
-              process.env.NEXT_PUBLIC_WHATSAPP_URL ||
-              "https://chat.whatsapp.com/"
-            }
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
-          >
-            <span aria-hidden="true">💬</span>
-            Help me build this on WhatsApp
-          </a>
           <button
             onClick={async () => {
               const supabase = createSupabaseBrowserClient();

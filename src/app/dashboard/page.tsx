@@ -90,7 +90,22 @@ export default function Dashboard() {
       user={{ name: conn.userName, company: conn.userCompany, email: conn.userEmail }}
     >
       <div className="mx-auto max-w-5xl px-6 py-8">
-        <ProgressNav tab={tab} setTab={setTab} conn={conn} />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <ProgressNav tab={tab} setTab={setTab} conn={conn} />
+          </div>
+          <a
+            href="https://chat.whatsapp.com/KjyBAVdBpG95pz4xegnjnu?mode=gi_t"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Help shape DataDonkey on WhatsApp"
+            className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/70"
+          >
+            <span aria-hidden="true">💬</span>
+            <span className="hidden sm:inline">Help build this on WhatsApp</span>
+            <span className="sm:hidden">WhatsApp</span>
+          </a>
+        </div>
         <QuickInviteBar conn={conn} onChange={load} />
         <div className="mt-8">
           <AnimatePresence mode="wait">
