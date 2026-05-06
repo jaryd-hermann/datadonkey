@@ -226,6 +226,7 @@ Operating principles:
 - Strategic reasoning. Don't just dump a number. Compare to a baseline, segment by something meaningful (cohort, platform, surface), and note whether the result is significant or noisy. If you only have one data point, say so.
 - Bottom line up front. First sentence is the headline finding with the concrete number.
 - Be useful, not just accurate. Either give an action ("→ X is likely the lever") or supportive framing ("→ this looks healthy; here's the bar to watch for").
+- If the question can't be answered today (no relevant events), say so plainly AND suggest the specific event(s) and properties the team should add to make it answerable. Format suggestions as a short "**Suggested instrumentation:**" bullet list. Don't pad — one or two concrete events with example property names.
 - Footnotes for transparency. End with a short "Notes" section listing: which event(s) you queried, which date range, any caveats, and any judgment calls you made (e.g. "interpreted 'churn' as users with no $pageview in 14d").
 - Preserve any URLs returned by tool calls (insight links, dashboard links). Inline them next to the relevant finding.
 - Markdown is welcome (bold, bullets, links). No headings larger than ###.
@@ -245,12 +246,13 @@ Answer it now using the data, with footnotes for the events and date ranges you 
   // generous output budget (each tool call eats tokens too). 6000 is plenty
   // for the typical case while leaving headroom.
   //
-  // Hard 60s timeout per question. The MCP can occasionally hang (PostHog
-  // MCP backed tool call sometimes never returns). Without this, a single
-  // hung call silently consumes the entire 300s function budget and leaves
-  // the pipeline stuck with no final state written.
+  // Hard 120s timeout per question. PostHog's MCP often does many search
+  // calls (insights/actions/dashboards) for thorough analysis — 60s was
+  // cutting off mid-search. With max 4 questions sequentially, 4 × 120s
+  // = 480s worst case but typical case is 60s/q so we comfortably fit
+  // under Vercel's 300s function cap.
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 60_000);
+  const timer = setTimeout(() => ac.abort(), 120_000);
   let res;
   try {
     res = await anthropic.beta.messages.create(
@@ -292,6 +294,78 @@ Answer it now using the data, with footnotes for the events and date ranges you 
     raw: res,
     prompt: { system: systemPrompt, user: userPrompt },
   };
+}
+
+// Synthesize a "Need to know" preamble + instrumentation-gaps callout from
+// the answered follow-up questions. Quick Sonnet call — adds ~5-10s but
+// gives the report a proper TL;DR.
+export interface ReportPreamble {
+  needToKnow: string;        // 2-4 short bullets, markdown
+  instrumentationGaps: string; // empty string if none, else bulleted suggestions
+}
+
+export async function buildReportPreamble(
+  answered: Array<{ question: string; answer: string }>,
+): Promise<ReportPreamble> {
+  if (answered.length === 0) {
+    return { needToKnow: "", instrumentationGaps: "" };
+  }
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 30_000);
+  try {
+    const res = await anthropic.messages.create(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 800,
+        system: `You write a 2-section preamble for a follow-up report.
+
+Section 1 — "Need to know"
+- 2-4 bullets, each ONE sentence.
+- Lead with the sharpest finding (a number, a delta, or "this couldn't be answered today").
+- Skip anything obvious or filler. The reader is busy.
+
+Section 2 — "Instrumentation gaps" (omit entirely if no gaps)
+- ONLY include if one or more questions couldn't be answered because events were missing.
+- For each such question, name the specific event(s) and property(ies) the team should add.
+- One bullet per gap, max 4 gaps.
+
+Return ONLY valid JSON, no prose, no code fences:
+{ "needToKnow": "<markdown bullets>", "instrumentationGaps": "<markdown bullets, or empty string if none>" }`,
+        messages: [
+          {
+            role: "user",
+            content: answered
+              .map(
+                (a, i) => `Q${i + 1}: ${a.question}\n\nAnswer:\n${a.answer}`,
+              )
+              .join("\n\n---\n\n"),
+          },
+        ],
+      },
+      { signal: ac.signal },
+    );
+    const text = res.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
+      .join("\n")
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
+    const parsed = JSON.parse(text) as ReportPreamble;
+    return {
+      needToKnow: typeof parsed.needToKnow === "string" ? parsed.needToKnow : "",
+      instrumentationGaps:
+        typeof parsed.instrumentationGaps === "string"
+          ? parsed.instrumentationGaps
+          : "",
+    };
+  } catch (err) {
+    console.warn("[buildReportPreamble] failed:", err);
+    return { needToKnow: "", instrumentationGaps: "" };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface FollowupQuestion {

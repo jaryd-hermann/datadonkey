@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import {
   analyzeTranscript,
   askDataToolStrategic,
+  buildReportPreamble,
   extractPostHogUrls,
   type FollowupQuestion,
 } from "@/lib/anthropic";
@@ -97,7 +98,11 @@ async function runFollowup(
   // Vercel Pro gives 300s of function time. Each strategic query takes
   // ~12-25s, so 6 questions in sequence (≈ 90-150s) fits comfortably with
   // headroom for analyzeTranscript + email + Slack at the end.
-  const QUESTION_BUDGET = 6;
+  // Each strategic question can take up to 120s on the MCP. Vercel Pro has
+  // a 300s function cap. Budgeting 4 questions sequential = 480s worst case,
+  // but typical is 30-60s per question so we comfortably fit. Going wider
+  // risked truncated answers — better to nail 4 than half-answer 6.
+  const QUESTION_BUDGET = 4;
   const queue = identified.slice(0, QUESTION_BUDGET);
   const skipped = identified.slice(QUESTION_BUDGET);
   await setStage(id, "querying", `${queue.length} question${queue.length === 1 ? "" : "s"}`);
@@ -167,14 +172,19 @@ async function runFollowup(
     } catch {}
   }
 
-  // Step 4: build the report markdown directly from the answers (each
-  // already has BLUF + findings + footnotes from the strategic analyst).
-  // We deliberately skip a separate compose-email LLM call to stay under
-  // Vercel Hobby's 60s function cap.
+  // Step 4: synthesize a "Need to know" preamble + flag any instrumentation
+  // gaps surfaced by the strategic analyst. ~10s on Sonnet, gives the
+  // report a proper TL;DR rather than dropping the reader straight into Q1.
+  const preamble = await buildReportPreamble(
+    answered.map((a) => ({ question: a.question, answer: a.answer ?? "" })),
+  );
+
   const titleStr = meeting.title ?? "your meeting";
   const subject = `DataDonkey follow-up: ${titleStr}`;
   const report = buildReportMarkdown({
     meetingTitle: meeting.title,
+    needToKnow: preamble.needToKnow,
+    instrumentationGaps: preamble.instrumentationGaps,
     answered: answered.map((a) => ({
       question: a.question,
       reasoning: a.reasoning,
@@ -259,6 +269,8 @@ async function runFollowup(
 
 function buildReportMarkdown(args: {
   meetingTitle: string | null;
+  needToKnow?: string;
+  instrumentationGaps?: string;
   answered: Array<{
     question: string;
     reasoning: string;
@@ -266,12 +278,23 @@ function buildReportMarkdown(args: {
     posthogUrls?: string[];
   }>;
 }): string {
-  const head = `## Follow-up: ${args.meetingTitle ?? "your meeting"}\n\n`;
+  const sections: string[] = [];
+  sections.push(`## Follow-up: ${args.meetingTitle ?? "your meeting"}`);
+  if (args.needToKnow && args.needToKnow.trim()) {
+    sections.push(`### Need to know\n\n${args.needToKnow.trim()}`);
+  }
+  if (args.instrumentationGaps && args.instrumentationGaps.trim()) {
+    sections.push(
+      `### Instrumentation gaps\n\nSome questions couldn't be answered today because the events aren't being tracked yet. Adding these would unblock future answers:\n\n${args.instrumentationGaps.trim()}`,
+    );
+  }
+  sections.push("---");
   const body = args.answered
     .map(
       (a, i) =>
         `### ${i + 1}. ${a.question}\n\n_Why this came up:_ ${a.reasoning}\n\n${a.answer}\n`,
     )
     .join("\n");
-  return head + body;
+  sections.push(body);
+  return sections.join("\n\n");
 }
