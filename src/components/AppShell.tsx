@@ -29,7 +29,7 @@ function Header({
   user: { name: string | null; company: string | null; email: string | null } | null;
 }) {
   return (
-    <header className="border-b border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-800/60 dark:bg-stone-950/80">
+    <header className="relative z-40 border-b border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-800/60 dark:bg-stone-950/80">
       {/* 3-col grid so the wordmark stays centered regardless of how many
           nav items appear on the right. */}
       <div className="mx-auto grid max-w-6xl grid-cols-[1fr_auto_1fr] items-center px-6 py-3">
@@ -114,7 +114,7 @@ function ProfileMenu({
         {initials}
       </button>
       {open && (
-        <div className="absolute right-0 top-10 z-20 w-64 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg dark:border-stone-800 dark:bg-stone-900">
+        <div className="absolute right-0 top-10 z-50 w-64 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-xl dark:border-stone-800 dark:bg-stone-900">
           <div className="border-b border-stone-100 p-4 dark:border-stone-800">
             <div className="text-sm font-medium text-stone-900 dark:text-stone-100">
               {user.name ?? "—"}

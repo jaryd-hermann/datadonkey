@@ -17,6 +17,13 @@ model Connection {
   userName     String?
   userCompany  String?
   userEmail    String?
+  userRole     String?   // e.g. "Product Manager", "Founder", "Engineer"
+  orgSize      String?   // e.g. "1-10", "11-50", "51-200", "201-1000", "1000+"
+
+  // Design partner gating: true if user came in via the /partner invite code.
+  // Drives free-tier UI on /pricing.
+  isPartner    Boolean   @default(false)
+  partnerCodeUsed String?
 
   // Which data tool the user picked, plus its provider-specific credentials
   // stored as a JSON blob. Shape depends on provider — see lib/providers.ts.
@@ -91,6 +98,12 @@ model Meeting {
 
   // Calendar event we joined for, if dispatched via auto-join.
   calendarEventId    String?  @unique
+
+  // Usage telemetry — totals across all LLM calls for this meeting.
+  // Stored as a JSON blob to avoid schema churn as we add stages, plus a
+  // single `costUsd` rollup for quick reporting.
+  usageJson      String?
+  costUsd        Float?    @default(0)
 
   questions     Question[]
 }

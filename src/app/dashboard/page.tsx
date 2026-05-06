@@ -72,6 +72,9 @@ interface ConnectionInfo {
   userName: string | null;
   userCompany: string | null;
   userEmail: string | null;
+  userRole: string | null;
+  orgSize: string | null;
+  isPartner: boolean;
   provider: { id: string; name: string; available: boolean };
   credentials: Record<string, string>;
   projectName: string | null;
@@ -136,6 +139,18 @@ export default function Dashboard() {
           <div className="min-w-0 flex-1">
             <ProgressNav tab={tab} setTab={setTab} conn={conn} />
           </div>
+          <a
+            href="/pricing"
+            title={conn.isPartner ? "You're free as a design partner" : "Upgrade your plan"}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+              conn.isPartner
+                ? "border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200"
+                : "bg-orange-600 text-white shadow-sm hover:bg-orange-700"
+            }`}
+          >
+            <span aria-hidden>{conn.isPartner ? "🎁" : "⚡"}</span>
+            <span>{conn.isPartner ? "Partner — free" : "Upgrade"}</span>
+          </a>
           <a
             href="https://chat.whatsapp.com/KjyBAVdBpG95pz4xegnjnu?mode=gi_t"
             target="_blank"

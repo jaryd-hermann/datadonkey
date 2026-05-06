@@ -31,6 +31,18 @@ export async function middleware(request: NextRequest) {
   // updated cookies via setAll above.
   await supabase.auth.getUser();
 
+  // Gate /signup behind /partner — design partners only during private beta.
+  // Logic: if hitting /signup without partner_verified=1 cookie, redirect.
+  const pathname = request.nextUrl.pathname;
+  if (pathname === "/signup") {
+    const verified = request.cookies.get("partner_verified")?.value === "1";
+    if (!verified) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/partner";
+      return NextResponse.redirect(url);
+    }
+  }
+
   return supabaseResponse;
 }
 

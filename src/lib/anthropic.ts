@@ -302,13 +302,19 @@ Answer it now using the data, with footnotes for the events and date ranges you 
 export interface ReportPreamble {
   needToKnow: string;        // 2-4 short bullets, markdown
   instrumentationGaps: string; // empty string if none, else bulleted suggestions
+  usage: { model: string; inputTokens: number; outputTokens: number };
 }
 
 export async function buildReportPreamble(
   answered: Array<{ question: string; answer: string }>,
 ): Promise<ReportPreamble> {
+  const empty: ReportPreamble = {
+    needToKnow: "",
+    instrumentationGaps: "",
+    usage: { model: "claude-sonnet-4-6", inputTokens: 0, outputTokens: 0 },
+  };
   if (answered.length === 0) {
-    return { needToKnow: "", instrumentationGaps: "" };
+    return empty;
   }
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 30_000);
@@ -359,10 +365,15 @@ Return ONLY valid JSON, no prose, no code fences:
         typeof parsed.instrumentationGaps === "string"
           ? parsed.instrumentationGaps
           : "",
+      usage: {
+        model: "claude-sonnet-4-6",
+        inputTokens: res.usage.input_tokens,
+        outputTokens: res.usage.output_tokens,
+      },
     };
   } catch (err) {
     console.warn("[buildReportPreamble] failed:", err);
-    return { needToKnow: "", instrumentationGaps: "" };
+    return empty;
   } finally {
     clearTimeout(timer);
   }
@@ -390,8 +401,24 @@ export function extractPostHogUrls(text: string): string[] {
 // Identifies genuine PostHog/analytics questions from a meeting transcript.
 // Doesn't actually query PostHog — that's the next phase. We only want the
 // list of questions worth asking.
+export interface AnalyzeResult {
+  questions: FollowupQuestion[];
+  usage: { model: string; inputTokens: number; outputTokens: number };
+}
+
 export async function analyzeTranscript(transcript: string): Promise<FollowupQuestion[]> {
-  if (!transcript.trim()) return [];
+  const r = await analyzeTranscriptWithUsage(transcript);
+  return r.questions;
+}
+
+export async function analyzeTranscriptWithUsage(
+  transcript: string,
+): Promise<AnalyzeResult> {
+  const empty: AnalyzeResult = {
+    questions: [],
+    usage: { model: "claude-sonnet-4-6", inputTokens: 0, outputTokens: 0 },
+  };
+  if (!transcript.trim()) return empty;
 
   // Hard 45s timeout. Without this, an Anthropic outage / retry loop can
   // silently consume the entire 300s function budget.
@@ -427,10 +454,16 @@ Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence w
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[analyzeTranscript] failed:", msg);
-    return [];
+    return empty;
   } finally {
     clearTimeout(timer);
   }
+
+  const usage = {
+    model: "claude-sonnet-4-6",
+    inputTokens: res.usage.input_tokens,
+    outputTokens: res.usage.output_tokens,
+  };
 
   const text = res.content
     .filter((b) => b.type === "text")
@@ -443,8 +476,8 @@ Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence w
 
   try {
     const parsed = JSON.parse(cleaned) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((p) => {
+    if (!Array.isArray(parsed)) return { questions: [], usage };
+    const questions = parsed.flatMap((p) => {
       const obj = p as { question?: unknown; reasoning?: unknown };
       if (typeof obj.question !== "string") return [];
       return [{
@@ -452,11 +485,12 @@ Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence w
         reasoning: typeof obj.reasoning === "string" ? obj.reasoning : "",
       }];
     });
+    return { questions, usage };
   } catch (err) {
     console.error("[analyzeTranscript] failed to parse JSON:", err);
     console.error("[analyzeTranscript] raw text length:", cleaned.length);
     console.error("[analyzeTranscript] raw text:\n" + cleaned);
-    return [];
+    return { questions: [], usage };
   }
 }
 

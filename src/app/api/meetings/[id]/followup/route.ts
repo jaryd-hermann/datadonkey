@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
-  analyzeTranscript,
+  analyzeTranscriptWithUsage,
   askDataToolStrategic,
   buildReportPreamble,
   extractPostHogUrls,
   type FollowupQuestion,
 } from "@/lib/anthropic";
+import { recordUsage } from "@/lib/usage";
 import { readConnection } from "@/lib/connection";
 import { sendFollowupEmail } from "@/lib/email";
 import { dmAuthedUser, dmUserByEmail } from "@/lib/slack";
@@ -72,7 +73,14 @@ async function runFollowup(
   // Step 1: identify questions worth answering
   await setStage(id, "reviewing");
   await setStage(id, "analyzing");
-  const identified = await analyzeTranscript(meeting.transcript ?? "");
+  const analyzeResult = await analyzeTranscriptWithUsage(meeting.transcript ?? "");
+  const identified = analyzeResult.questions;
+  await recordUsage(id, {
+    stage: "analyze",
+    model: analyzeResult.usage.model,
+    inputTokens: analyzeResult.usage.inputTokens,
+    outputTokens: analyzeResult.usage.outputTokens,
+  });
   console.log(`[followup] analyzed in ${Date.now() - tStart}ms -> ${identified.length} questions`);
 
   if (identified.length === 0) {
@@ -119,6 +127,13 @@ async function runFollowup(
       console.log(
         `[followup] q="${q.question.slice(0, 60)}" ${Date.now() - t0}ms tools=${result.toolCalls.length} tok=${result.usage.outputTokens}`,
       );
+      await recordUsage(id, {
+        stage: "strategic",
+        model: "claude-sonnet-4-6",
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        detail: q.question.slice(0, 80),
+      });
       answered.push({
         question: q.question,
         reasoning: q.reasoning,
@@ -178,6 +193,12 @@ async function runFollowup(
   const preamble = await buildReportPreamble(
     answered.map((a) => ({ question: a.question, answer: a.answer ?? "" })),
   );
+  await recordUsage(id, {
+    stage: "preamble",
+    model: preamble.usage.model,
+    inputTokens: preamble.usage.inputTokens,
+    outputTokens: preamble.usage.outputTokens,
+  });
 
   const titleStr = meeting.title ?? "your meeting";
   const subject = `DataDonkey follow-up: ${titleStr}`;

@@ -70,6 +70,8 @@ export default function Signup() {
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState("");
+  const [orgSize, setOrgSize] = useState("");
 
   // Step 2 state
   const [tool, setTool] = useState<ToolId>("posthog");
@@ -240,7 +242,9 @@ export default function Signup() {
     }
 
     setBusy(true);
-    // Persist name/company so they survive the auth round-trip.
+    // Persist name/company/role/orgSize so they survive the auth round-trip.
+    const partnerVerified = readCookie("partner_verified") === "1";
+    const partnerCode = readCookie("partner_code") ?? undefined;
     const persist = await fetch("/api/connection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -248,9 +252,22 @@ export default function Signup() {
         userName: name.trim(),
         userCompany: company.trim(),
         userEmail: email.trim() || undefined,
+        userRole: role || undefined,
+        orgSize: orgSize || undefined,
         provider: tool,
       }),
     });
+    if (partnerVerified) {
+      // Mark them as a partner via PATCH (POST doesn't accept these fields).
+      await fetch("/api/connection", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isPartner: true,
+          partnerCodeUsed: partnerCode,
+        }),
+      });
+    }
     if (!persist.ok) {
       const j = await persist.json();
       setBusy(false);
@@ -414,6 +431,10 @@ export default function Signup() {
                     setCompany={setCompany}
                     email={email}
                     setEmail={setEmail}
+                    role={role}
+                    setRole={setRole}
+                    orgSize={orgSize}
+                    setOrgSize={setOrgSize}
                     tool={tool}
                     onContinue={submitAuth}
                     error={error}
@@ -567,6 +588,26 @@ function ProgressDots({
   );
 }
 
+const ROLE_OPTIONS = [
+  "Product Manager",
+  "Founder / CEO",
+  "Engineer",
+  "Designer",
+  "Data / Analyst",
+  "Marketing",
+  "Customer Success",
+  "Operations",
+  "Other",
+];
+
+const ORG_SIZE_OPTIONS = [
+  "1-10",
+  "11-50",
+  "51-200",
+  "201-1000",
+  "1000+",
+];
+
 function AuthStep(props: {
   name: string;
   setName: (v: string) => void;
@@ -574,6 +615,10 @@ function AuthStep(props: {
   setCompany: (v: string) => void;
   email: string;
   setEmail: (v: string) => void;
+  role: string;
+  setRole: (v: string) => void;
+  orgSize: string;
+  setOrgSize: (v: string) => void;
   onContinue: (method: "email" | "google") => void;
   error: string | null;
   busy: boolean;
@@ -630,6 +675,25 @@ function AuthStep(props: {
             placeholder="Acme"
           />
         </Field>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Your role">
+            <Select
+              value={props.role}
+              onChange={(v) => props.setRole(v)}
+              placeholder="Select…"
+              options={ROLE_OPTIONS}
+            />
+          </Field>
+          <Field label="Org size">
+            <Select
+              value={props.orgSize}
+              onChange={(v) => props.setOrgSize(v)}
+              placeholder="Select…"
+              options={ORG_SIZE_OPTIONS}
+            />
+          </Field>
+        </div>
 
         <div className="my-5 flex items-center gap-3">
           <hr className="grow border-stone-200 dark:border-stone-800" />
@@ -1255,6 +1319,33 @@ function RegionField({
   );
 }
 
+function Select({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder?: string;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:border-stone-500 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+    >
+      <option value="">{placeholder ?? "Select…"}</option>
+      {options.map((o) => (
+        <option key={o} value={o}>
+          {o}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
@@ -1360,6 +1451,15 @@ function Toggle({
       </span>
     </button>
   );
+}
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  for (const part of document.cookie.split(";")) {
+    const [k, v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v ?? "");
+  }
+  return null;
 }
 
 function ErrorBox({ children }: { children: React.ReactNode }) {

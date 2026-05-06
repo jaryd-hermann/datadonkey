@@ -33,6 +33,9 @@ export async function GET() {
       }
     }
   }
+  // Pull additional flat fields directly so we don't need to thread them
+  // through ConnectionView: role, orgSize, isPartner.
+  const row = await prisma.connection.findUnique({ where: { id: "default" } });
   return NextResponse.json({
     exists: conn.exists,
     signedUp: conn.signedUp,
@@ -40,6 +43,9 @@ export async function GET() {
     userName: conn.userName,
     userCompany: conn.userCompany,
     userEmail: conn.userEmail,
+    userRole: row?.userRole ?? null,
+    orgSize: row?.orgSize ?? null,
+    isPartner: row?.isPartner ?? false,
     provider: {
       id: conn.provider.id,
       name: conn.provider.name,
@@ -76,6 +82,16 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.slackTeamName === "string" || body.slackTeamName === null) {
     update.slackTeamName = body.slackTeamName;
   }
+  if (typeof body.userRole === "string" || body.userRole === null) {
+    update.userRole = body.userRole;
+  }
+  if (typeof body.orgSize === "string" || body.orgSize === null) {
+    update.orgSize = body.orgSize;
+  }
+  if (typeof body.isPartner === "boolean") update.isPartner = body.isPartner;
+  if (typeof body.partnerCodeUsed === "string") {
+    update.partnerCodeUsed = body.partnerCodeUsed;
+  }
 
   // Enforce: at least one preference must be enabled.
   if (update.prefLive === false || update.prefFollowup === false) {
@@ -104,6 +120,8 @@ export async function POST(req: NextRequest) {
   const userName = String(body?.userName ?? "").trim();
   const userCompany = String(body?.userCompany ?? "").trim();
   const userEmail = body?.userEmail ? String(body.userEmail).trim() : undefined;
+  const userRole = body?.userRole ? String(body.userRole).trim() : undefined;
+  const orgSize = body?.orgSize ? String(body.orgSize).trim() : undefined;
   const provider = String(body?.provider ?? "posthog") as ProviderId;
   if (!userName || !userCompany) {
     return NextResponse.json(
@@ -115,6 +133,15 @@ export async function POST(req: NextRequest) {
   const before = await prisma.connection.findUnique({ where: { id: "default" } });
   const wasNew = !before?.welcomeEmailedAt;
   await saveSignup({ userName, userCompany, userEmail, provider });
+  if (userRole || orgSize) {
+    await prisma.connection.update({
+      where: { id: "default" },
+      data: {
+        ...(userRole ? { userRole } : {}),
+        ...(orgSize ? { orgSize } : {}),
+      },
+    });
+  }
 
   if (wasNew && userEmail) {
     after(async () => {
