@@ -639,23 +639,30 @@ function ToolTab({ conn }: { conn: ConnectionInfo }) {
             )}
           </div>
           {conn.connected && (
-            <div className="mt-1 text-sm text-stone-600 dark:text-stone-400">
-              {conn.organizationName && (
-                <span className="font-medium text-stone-900 dark:text-stone-100">
-                  {conn.organizationName}
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-stone-600 dark:text-stone-400">
+              {conn.projectName && (
+                <span className="font-semibold text-stone-900 dark:text-stone-100">
+                  {conn.projectName}
                 </span>
               )}
-              {conn.organizationName && conn.projectName && (
-                <span className="mx-1.5 text-stone-400">·</span>
-              )}
-              {conn.projectName && <span>{conn.projectName}</span>}
               {projectId && (
-                <span className="ml-2 rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] text-stone-600 dark:bg-stone-800 dark:text-stone-400">
+                <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] text-stone-600 dark:bg-stone-800 dark:text-stone-400">
                   #{projectId}
                 </span>
               )}
+              {conn.organizationName && (
+                <>
+                  <span className="text-stone-400">·</span>
+                  <span>{conn.organizationName}</span>
+                </>
+              )}
               {region && (
-                <span className="ml-2 text-[11px] text-stone-500">{region}</span>
+                <>
+                  <span className="text-stone-400">·</span>
+                  <span className="text-[11px] uppercase tracking-wider text-stone-500">
+                    {region}
+                  </span>
+                </>
               )}
             </div>
           )}
