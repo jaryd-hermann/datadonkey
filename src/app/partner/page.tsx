@@ -26,7 +26,7 @@ export default function PartnerGate() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     const normalized = code.trim().toLowerCase();
@@ -34,16 +34,27 @@ export default function PartnerGate() {
       setError("That code didn't work. Try again or apply to be a design partner below.");
       return;
     }
-    // Set client-side cookie + localStorage so /signup knows we came through.
-    document.cookie = `partner_verified=1; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`;
-    document.cookie = `partner_code=${encodeURIComponent(normalized)}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`;
+    // Server-set cookie is more reliable than document.cookie across the
+    // middleware-redirected navigation that follows.
+    const r = await fetch("/api/partner/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: normalized }),
+    });
+    if (!r.ok) {
+      setError("That code didn't work. Try again or apply to be a design partner below.");
+      return;
+    }
     try {
       localStorage.setItem("partner_verified", "1");
       localStorage.setItem("partner_code", normalized);
     } catch {}
     setVerified(true);
     celebrate();
-    setTimeout(() => router.push("/signup"), 1600);
+    // Hard navigation so the freshly-set cookie ships with the request.
+    setTimeout(() => {
+      window.location.href = "/signup";
+    }, 1600);
   }
 
   // If they already verified once, push them through.
@@ -146,6 +157,12 @@ export default function PartnerGate() {
               <div className="mt-1 text-sm">
                 Verified as a design partner. Sending you to signup…
               </div>
+              <a
+                href="/signup"
+                className="mt-3 inline-block text-sm font-semibold underline hover:no-underline"
+              >
+                Or click here to continue →
+              </a>
             </motion.div>
           )}
 
