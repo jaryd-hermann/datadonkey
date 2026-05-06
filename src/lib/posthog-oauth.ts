@@ -12,9 +12,28 @@ export const REGION_API_HOST: Record<PosthogRegion, string> = {
   eu: "https://eu.posthog.com",
 };
 
+// Two ways to identify ourselves to PostHog OAuth:
+//
+//   1. POSTHOG_OAUTH_CLIENT_ID (a UUID/string registered via PostHog's
+//      Django admin). Required today — PostHog Cloud's regional hosts
+//      (us.posthog.com / eu.posthog.com) don't yet accept URL-as-client-id.
+//   2. CIMD URL fallback (forward-compat). The /.well-known/oauth-client
+//      doc is hosted regardless; the moment PostHog ships CIMD support
+//      we get it for free.
+//
+// If POSTHOG_OAUTH_CLIENT_SECRET is also set, the token exchange will
+// include it (confidential client). Otherwise we send only PKCE
+// (public client).
 export function clientId(): string {
+  const registered = process.env.POSTHOG_OAUTH_CLIENT_ID?.trim();
+  if (registered) return registered;
   const origin = process.env.APP_URL ?? "https://datadonkey.ai";
   return `${origin}/.well-known/oauth-client`;
+}
+
+export function clientSecret(): string | null {
+  const secret = process.env.POSTHOG_OAUTH_CLIENT_SECRET?.trim();
+  return secret || null;
 }
 
 export function redirectUri(): string {
@@ -73,6 +92,16 @@ export interface TokenResponse {
   id_token?: string;
 }
 
+function tokenBody(extra: Record<string, string>): Record<string, string> {
+  const body: Record<string, string> = {
+    ...extra,
+    client_id: clientId(),
+  };
+  const secret = clientSecret();
+  if (secret) body.client_secret = secret;
+  return body;
+}
+
 export async function exchangeCode(args: {
   code: string;
   codeVerifier: string;
@@ -80,13 +109,14 @@ export async function exchangeCode(args: {
   const r = await fetch(`${POSTHOG_OAUTH_BASE}/oauth/token/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "authorization_code",
-      code: args.code,
-      redirect_uri: redirectUri(),
-      client_id: clientId(),
-      code_verifier: args.codeVerifier,
-    }),
+    body: JSON.stringify(
+      tokenBody({
+        grant_type: "authorization_code",
+        code: args.code,
+        redirect_uri: redirectUri(),
+        code_verifier: args.codeVerifier,
+      }),
+    ),
   });
   if (!r.ok) {
     throw new Error(`PostHog token exchange failed: ${r.status} ${await r.text()}`);
@@ -98,11 +128,12 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
   const r = await fetch(`${POSTHOG_OAUTH_BASE}/oauth/token/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: clientId(),
-    }),
+    body: JSON.stringify(
+      tokenBody({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    ),
   });
   if (!r.ok) {
     throw new Error(`PostHog refresh failed: ${r.status} ${await r.text()}`);

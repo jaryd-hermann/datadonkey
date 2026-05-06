@@ -57,10 +57,12 @@ export default function PartnerGate() {
     }, 1600);
   }
 
-  // If they already verified once, push them through.
+  // If they already verified once on this device, push them straight through
+  // — no need to gate them every visit. The middleware still enforces the
+  // cookie, so this is just a UX shortcut.
   useEffect(() => {
     if (typeof document !== "undefined" && document.cookie.includes("partner_verified=1")) {
-      setVerified(true);
+      window.location.href = "/signup";
     }
   }, []);
 

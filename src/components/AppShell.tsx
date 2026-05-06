@@ -53,7 +53,7 @@ function Header({
                 Sign in
               </Link>
               <Link
-                href="/signup"
+                href="/partner"
                 className="rounded-md bg-stone-900 px-3 py-1.5 text-sm font-medium text-stone-50 hover:bg-stone-800 dark:bg-stone-50 dark:text-stone-900 dark:hover:bg-stone-200"
               >
                 Get started

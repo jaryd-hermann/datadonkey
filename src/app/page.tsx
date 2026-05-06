@@ -26,7 +26,7 @@ function Hero() {
       </p>
       <div className="mt-9 flex items-center justify-center gap-4">
         <Link
-          href="/signup"
+          href="/partner"
           className="inline-flex items-center gap-2 rounded-full bg-orange-600 px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-stone-950"
         >
           Connect your data
@@ -149,7 +149,7 @@ function WhoItsFor() {
       </ul>
       <div className="mt-12 text-center">
         <Link
-          href="/signup"
+          href="/partner"
           className="inline-flex items-center gap-2 rounded-full bg-orange-600 px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-orange-700"
         >
           Connect your data

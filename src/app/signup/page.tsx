@@ -823,6 +823,37 @@ function ToolStep(props: {
               <div className="mb-3 text-xs uppercase tracking-widest text-stone-500">
                 Connect {props.provider.name}
               </div>
+
+              {/* Primary action: OAuth (~5x faster). Sits at the top before
+                  any field inputs so it's visually unmissable. */}
+              {props.provider.id === "posthog" && (
+                <div className="mb-5">
+                  <a
+                    href={`/api/oauth/posthog/start?return=/signup&region=${getRegionFromHost(props.credValues.host)}`}
+                    className="flex w-full items-center justify-center gap-2 rounded-md bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700"
+                  >
+                    <img src="/posthogicon.png" alt="" className="h-4 w-4 object-contain" />
+                    <span>Continue with PostHog</span>
+                    <span className="rounded-full bg-orange-400/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                      ~5× faster
+                    </span>
+                  </a>
+                  <p className="mt-2 text-center text-[11px] text-stone-500">
+                    One click — works with SSO/SAML. No keys to copy.
+                  </p>
+                </div>
+              )}
+
+              {props.provider.id === "posthog" && (
+                <div className="my-5 flex items-center gap-3">
+                  <hr className="grow border-stone-200 dark:border-stone-800" />
+                  <span className="text-[10px] uppercase tracking-widest text-stone-500">
+                    Or the longer way
+                  </span>
+                  <hr className="grow border-stone-200 dark:border-stone-800" />
+                </div>
+              )}
+
               <div className="space-y-3">
                 {props.provider.credentialFields.map((f) => (
                   <Field key={f.key} label={f.label}>
@@ -862,32 +893,11 @@ function ToolStep(props: {
 
               {props.error && <ErrorBox>{props.error}</ErrorBox>}
 
-              {/* PostHog OAuth (CIMD) — primary path. ~5x faster than the
-                  manual key paste, and respects org SSO/SAML automatically.
-                  The PAT field below remains as a fallback. */}
-              {props.provider.id === "posthog" && (
-                <a
-                  href={`/api/oauth/posthog/start?return=/signup&region=${getRegionFromHost(props.credValues.host)}`}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700"
-                >
-                  <img src="/posthogicon.png" alt="" className="h-4 w-4 object-contain" />
-                  <span>Continue with PostHog</span>
-                  <span className="rounded-full bg-orange-400/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-                    ~5× faster
-                  </span>
-                </a>
-              )}
-              {props.provider.id === "posthog" && (
-                <p className="mt-2 text-center text-[11px] text-stone-500">
-                  One click — works with SSO/SAML. No keys to copy. Or paste a
-                  Personal API Key below if you prefer.
-                </p>
-              )}
               <PrimaryButton
                 type="button"
                 disabled={props.busy}
                 onClick={props.onContinue}
-                className="mt-3"
+                className="mt-4"
               >
                 {props.busy ? "Validating…" : "Use API key & continue"}
               </PrimaryButton>
