@@ -118,16 +118,45 @@ export default function Signup() {
       if (j.userEmail) setEmail(j.userEmail);
       else if (u.email) setEmail(u.email);
 
-      if (j.signedUp) {
+      // Reflect any persisted connections from the DB so resume-state matches reality.
+      if (j.calendarConnected) {
+        setCalendarConnected(true);
+        if (j.calendarProvider) setCalendarProvider(j.calendarProvider);
+      }
+      if (j.slackConnected) setSlackConnected(true);
+
+      // Detect return-from-OAuth markers and route the user back to the
+      // step they came from, fire confetti, then strip the params.
+      const params = new URLSearchParams(window.location.search);
+      const googleOk = params.get("google") === "ok";
+      const slackOk = params.get("slack") === "ok";
+      let landed: number | null = null;
+      if (googleOk) {
+        setCalendarConnected(true);
+        setCalendarProvider("google");
+        landed = STEPS.findIndex((s) => s.id === "calendar");
+        celebrate();
+      } else if (slackOk) {
+        setSlackConnected(true);
+        landed = STEPS.findIndex((s) => s.id === "slack");
+        celebrate();
+      }
+      if (googleOk || slackOk) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("google");
+        url.searchParams.delete("slack");
+        window.history.replaceState(null, "", url.toString());
+      }
+
+      if (landed !== null) {
+        setStepIdx(landed);
+        setMaxStep((m) => Math.max(m, landed));
+      } else if (j.signedUp) {
         // Authed + name/company saved — start at the data tool step.
-        // We always land on tool (step 1) rather than auto-skipping past it,
-        // so the user sees the connected provider and can verify before moving on.
         setStepIdx(1);
         setMaxStep((m) => Math.max(m, 1));
       }
       // If authed but not signedUp, stay on step 0 so they enter company.
-      // The Continue with Google button will short-circuit since they're
-      // already signed in.
     })();
   }, []);
 
@@ -979,7 +1008,7 @@ function CalendarStep(props: {
           </div>
         ) : (
           <a
-            href="/api/oauth/google/start"
+            href="/api/oauth/google/start?return=/signup"
             className="flex w-full items-center justify-between gap-2 rounded-md border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
           >
             <span className="flex items-center gap-2.5">
@@ -1038,7 +1067,7 @@ function SlackStep(props: {
           </div>
         ) : (
           <a
-            href="/api/oauth/slack/start"
+            href="/api/oauth/slack/start?return=/signup"
             className="flex w-full items-center justify-between gap-2 rounded-md border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
           >
             <span className="flex items-center gap-2.5">

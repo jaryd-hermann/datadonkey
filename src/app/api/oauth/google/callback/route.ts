@@ -7,8 +7,19 @@ export async function GET(req: NextRequest) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const cookieState = req.cookies.get("google_oauth_state")?.value;
+  const returnTo = req.cookies.get("oauth_return")?.value;
+  // Honor the return cookie set at /api/oauth/google/start. Fall back to
+  // /dashboard so legacy starts (no cookie) still work.
+  const base = returnTo && returnTo.startsWith("/") ? returnTo : "/dashboard";
+  const successUrl = base.startsWith("/signup")
+    ? new URL(`${base}?google=ok`, url.origin)
+    : new URL(`${base}?google=ok#calendar`, url.origin);
+  const errorUrl = base.startsWith("/signup")
+    ? new URL(`${base}?google=error`, url.origin)
+    : new URL(`${base}?google=error#calendar`, url.origin);
+
   if (!code || !state || state !== cookieState) {
-    return NextResponse.redirect(new URL("/dashboard?google=error#calendar", url.origin));
+    return clearOAuthCookies(NextResponse.redirect(errorUrl));
   }
   const origin = process.env.APP_URL ?? url.origin;
   const redirectUri = `${origin}/api/oauth/google/callback`;
@@ -39,9 +50,15 @@ export async function GET(req: NextRequest) {
         googleEmail: email,
       },
     });
-    return NextResponse.redirect(new URL("/dashboard?google=ok#calendar", url.origin));
+    return clearOAuthCookies(NextResponse.redirect(successUrl));
   } catch (err) {
     console.error("[google callback]", err);
-    return NextResponse.redirect(new URL("/dashboard?google=error#calendar", url.origin));
+    return clearOAuthCookies(NextResponse.redirect(errorUrl));
   }
+}
+
+function clearOAuthCookies(res: NextResponse) {
+  res.cookies.delete("google_oauth_state");
+  res.cookies.delete("oauth_return");
+  return res;
 }
