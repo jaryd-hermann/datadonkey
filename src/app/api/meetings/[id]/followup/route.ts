@@ -9,6 +9,7 @@ import {
 import { readConnection } from "@/lib/connection";
 import { sendFollowupEmail } from "@/lib/email";
 import { dmAuthedUser, dmUserByEmail } from "@/lib/slack";
+import { setStage } from "@/lib/pipeline";
 
 // Followup pipeline: 30-90s of MCP queries + Resend + Slack send.
 // Vercel Hobby caps at 60s, Pro at 300s. We declare 300 here for headroom.
@@ -42,6 +43,8 @@ export async function POST(
   await prisma.meeting.update({ where: { id }, data: { followupAttempted: true } });
 
   // Step 1: identify questions worth answering
+  await setStage(id, "reviewing");
+  await setStage(id, "analyzing");
   const identified = await analyzeTranscript(meeting.transcript);
   console.log(`[followup] analyzed in ${Date.now() - tStart}ms -> ${identified.length} questions`);
 
@@ -57,6 +60,7 @@ export async function POST(
         followupReport: null,
       },
     });
+    await setStage(id, "done", "no follow-up worth sending");
     return NextResponse.json({ followups: [], emailSubject: null, emailDraft: null });
   }
 
@@ -70,6 +74,7 @@ export async function POST(
   const QUESTION_BUDGET = 6;
   const queue = identified.slice(0, QUESTION_BUDGET);
   const skipped = identified.slice(QUESTION_BUDGET);
+  await setStage(id, "querying", `${queue.length} question${queue.length === 1 ? "" : "s"}`);
   const answered: Array<FollowupQuestion & { mcpPrompt: string }> = [];
   for (const q of queue) {
     const t0 = Date.now();
@@ -153,6 +158,7 @@ export async function POST(
   });
 
   // Step 5: send to owner via Resend
+  await setStage(id, "delivering");
   let emailedAt: Date | null = null;
   let emailReason: string | undefined;
   if (conn.userEmail) {
@@ -204,6 +210,15 @@ export async function POST(
     },
   });
 
+  const stageDetail =
+    emailedAt && slackedAt
+      ? "email + Slack delivered"
+      : emailedAt
+        ? "email delivered"
+        : slackedAt
+          ? "Slack delivered"
+          : "saved (no delivery)";
+  await setStage(id, "done", stageDetail);
   console.log(
     `[followup] DONE meeting=${id} total=${Date.now() - tStart}ms email=${!!emailedAt} slack=${!!slackedAt}`,
   );

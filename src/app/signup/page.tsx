@@ -136,10 +136,21 @@ export default function Signup() {
         setCalendarProvider("google");
         landed = STEPS.findIndex((s) => s.id === "calendar");
         celebrate();
+        // Auto-advance to Slack after the confetti settles so the user
+        // doesn't have to hit "Continue" themselves.
+        const next = STEPS.findIndex((s) => s.id === "slack");
+        setTimeout(() => {
+          setDirection(1);
+          setStepIdx(next);
+          setMaxStep((m) => Math.max(m, next));
+        }, 1400);
       } else if (slackOk) {
         setSlackConnected(true);
         landed = STEPS.findIndex((s) => s.id === "slack");
         celebrate();
+        // Slack is the final step — auto-advance to /dashboard after the
+        // confetti so the user lands cleanly in the app.
+        setTimeout(() => router.push("/dashboard"), 1600);
       }
       if (googleOk || slackOk) {
         const url = new URL(window.location.href);
@@ -158,6 +169,8 @@ export default function Signup() {
       }
       // If authed but not signedUp, stay on step 0 so they enter company.
     })();
+    // router is stable; intentionally only run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // When tool changes, fetch its provider shape from server. We do this by

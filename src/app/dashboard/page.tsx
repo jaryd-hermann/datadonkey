@@ -18,10 +18,52 @@ interface Meeting {
   recallBotId: string;
   meetingUrl: string;
   status: string;
+  title: string | null;
+  participants: string | null;
   createdAt: string;
   endedAt: string | null;
   questions: Question[];
+  pipelineStage: string | null;
+  pipelineStageAt: string | null;
+  pipelineStages: string | null;
+  pipelineDismissed: boolean;
+  followupAttempted?: boolean;
+  followupReport?: string | null;
 }
+
+interface PipelineEntry {
+  stage: string;
+  ts: number;
+  ok?: boolean;
+  detail?: string;
+}
+
+const PIPELINE_STAGES = [
+  "listening",
+  "reviewing",
+  "analyzing",
+  "querying",
+  "delivering",
+  "done",
+] as const;
+const STAGE_LABELS: Record<string, string> = {
+  listening: "Listening",
+  reviewing: "Reviewing",
+  analyzing: "Analyzing",
+  querying: "Querying data",
+  delivering: "Delivering",
+  done: "Delivered",
+  failed: "Stopped",
+};
+const STAGE_DESCS: Record<string, string> = {
+  listening: "Capturing the conversation in real time.",
+  reviewing: "Reading through the meeting.",
+  analyzing: "Pulling out data questions worth answering.",
+  querying: "Asking your data tool for real numbers.",
+  delivering: "Sending the follow-up to your inbox + Slack.",
+  done: "All done — follow-up delivered.",
+  failed: "Something went wrong. Try Re-generate from the meeting page.",
+};
 
 interface ConnectionInfo {
   exists: boolean;
@@ -106,6 +148,7 @@ export default function Dashboard() {
             <span className="sm:hidden">WhatsApp</span>
           </a>
         </div>
+        <PipelineBanner meetings={meetings} onDismiss={load} />
         <QuickInviteBar conn={conn} onChange={load} />
         <div className="mt-8">
           <AnimatePresence mode="wait">
@@ -402,35 +445,315 @@ function MeetingsTab({
 
       <HowItWorks providerName={conn.provider.name} />
 
+      {/* Upcoming events from calendar (only if connected) */}
+      {conn.calendarConnected && (
+        <UpcomingEvents conn={conn} />
+      )}
+
       {/* Active meetings (live + still-joining) */}
       {active.length > 0 && (
         <div className="mt-8">
-          <h3 className="text-xs uppercase tracking-widest text-stone-500">Active</h3>
+          <h3 className="text-xs uppercase tracking-widest text-stone-500">
+            Active in DataDonkey
+          </h3>
           <div className="mt-3 space-y-3">
             {active.map((m) => (
-              <MeetingCard key={m.id} m={m} />
+              <MeetingCardWithRemove key={m.id} m={m} onChange={onChange} />
             ))}
           </div>
         </div>
       )}
 
-      {/* Past sessions */}
+      {/* Past sessions, grouped by day */}
       <div className="mt-8">
         <h3 className="text-xs uppercase tracking-widest text-stone-500">
           Past sessions{" "}
           <span className="text-stone-400">({past.length})</span>
         </h3>
-        <div className="mt-3 space-y-3">
+        <div className="mt-3 space-y-6">
           {past.length === 0 && (
             <div className="rounded-lg border border-dashed border-stone-300 bg-white px-6 py-12 text-center text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900">
               No past sessions yet.
             </div>
           )}
-          {past.map((m) => (
-            <MeetingCard key={m.id} m={m} />
+          {groupByDay(past).map((g) => (
+            <section key={g.label}>
+              <h4 className="text-[11px] font-semibold uppercase tracking-widest text-stone-500">
+                {g.label}{" "}
+                <span className="ml-1 font-normal normal-case text-stone-400">
+                  · {g.dateLabel}
+                </span>
+              </h4>
+              <div className="mt-2 space-y-3">
+                {g.meetings.map((m) => (
+                  <MeetingCard key={m.id} m={m} />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface DayGroup {
+  label: string; // "Today" | "Yesterday" | "Mon"
+  dateLabel: string; // "May 6, 2026"
+  meetings: Meeting[];
+}
+
+function groupByDay(meetings: Meeting[]): DayGroup[] {
+  const groups = new Map<string, DayGroup>();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  for (const m of meetings) {
+    const d = new Date(m.createdAt);
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const key = String(dayStart);
+    if (!groups.has(key)) {
+      const offset = (today - dayStart) / dayMs;
+      const label =
+        offset === 0
+          ? "Today"
+          : offset === 1
+            ? "Yesterday"
+            : offset > 0 && offset < 7
+              ? d.toLocaleDateString(undefined, { weekday: "long" })
+              : d.toLocaleDateString(undefined, { weekday: "short" });
+      const dateLabel = d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: dayStart < today - 365 * dayMs ? "numeric" : undefined,
+      });
+      groups.set(key, { label, dateLabel, meetings: [] });
+    }
+    groups.get(key)!.meetings.push(m);
+  }
+  // Sort groups newest first
+  return Array.from(groups.entries())
+    .sort((a, b) => Number(b[0]) - Number(a[0]))
+    .map(([, g]) => g);
+}
+
+interface UpcomingEvent {
+  id: string;
+  summary: string;
+  meetingUrl: string | null;
+  start: string | null;
+  end: string | null;
+  attendees: { email: string | null; name: string | null }[];
+  skip: boolean;
+  dispatched: boolean;
+  meetingId: string | null;
+}
+
+function UpcomingEvents({ conn }: { conn: ConnectionInfo }) {
+  const [events, setEvents] = useState<UpcomingEvent[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    try {
+      const r = await fetch("/api/calendar/upcoming");
+      const j = await r.json();
+      if (j.events) setEvents(j.events as UpcomingEvent[]);
+      if (j.error) setError(j.error);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  async function toggle(eventId: string, currentSkip: boolean) {
+    setEvents((prev) =>
+      prev?.map((e) => (e.id === eventId ? { ...e, skip: !currentSkip } : e)) ?? null,
+    );
+    await fetch("/api/calendar/upcoming", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventId, skip: !currentSkip }),
+    });
+  }
+
+  if (events === null) return null;
+  if (error) {
+    return (
+      <div className="mt-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+        Couldn&apos;t reach Google Calendar — try reconnecting.
+      </div>
+    );
+  }
+
+  if (events.length === 0) {
+    return (
+      <div className="mt-8">
+        <h3 className="text-xs uppercase tracking-widest text-stone-500">
+          Upcoming on your calendar
+        </h3>
+        <div className="mt-2 rounded-lg border border-dashed border-stone-300 bg-white px-6 py-8 text-center text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900">
+          No upcoming meetings with a video link in the next 7 days.
+        </div>
+      </div>
+    );
+  }
+
+  // Group upcoming by day too
+  const grouped = groupUpcomingByDay(events);
+
+  return (
+    <div className="mt-8">
+      <h3 className="text-xs uppercase tracking-widest text-stone-500">
+        Upcoming on your calendar
+      </h3>
+      <p className="mt-1 text-xs text-stone-500">
+        {conn.provider.name} will join meetings with a video link unless you
+        opt out below.
+      </p>
+      <div className="mt-3 space-y-5">
+        {grouped.map((g) => (
+          <section key={g.label}>
+            <h4 className="text-[11px] font-semibold uppercase tracking-widest text-stone-500">
+              {g.label}
+              <span className="ml-2 font-normal normal-case text-stone-400">
+                · {g.dateLabel}
+              </span>
+            </h4>
+            <div className="mt-2 space-y-2">
+              {g.events.map((e) => (
+                <UpcomingEventRow key={e.id} ev={e} onToggle={toggle} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function groupUpcomingByDay(
+  events: UpcomingEvent[],
+): { label: string; dateLabel: string; events: UpcomingEvent[] }[] {
+  const groups = new Map<string, { label: string; dateLabel: string; events: UpcomingEvent[] }>();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  for (const ev of events) {
+    if (!ev.start) continue;
+    const d = new Date(ev.start);
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const key = String(dayStart);
+    if (!groups.has(key)) {
+      const offset = (dayStart - today) / dayMs;
+      const label =
+        offset === 0
+          ? "Today"
+          : offset === 1
+            ? "Tomorrow"
+            : d.toLocaleDateString(undefined, { weekday: "long" });
+      const dateLabel = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      groups.set(key, { label, dateLabel, events: [] });
+    }
+    groups.get(key)!.events.push(ev);
+  }
+  return Array.from(groups.entries())
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([, g]) => g);
+}
+
+function UpcomingEventRow({
+  ev,
+  onToggle,
+}: {
+  ev: UpcomingEvent;
+  onToggle: (id: string, skip: boolean) => void;
+}) {
+  const time = ev.start
+    ? new Date(ev.start).toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "";
+  const willJoin = !ev.skip && !ev.dispatched;
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 transition ${
+        ev.skip
+          ? "border-stone-200 bg-stone-50 opacity-70 dark:border-stone-800 dark:bg-stone-900/50"
+          : "border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
+      }`}
+    >
+      <div className="w-16 shrink-0 text-sm font-mono text-stone-600 dark:text-stone-400">
+        {time}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-stone-900 dark:text-stone-100">
+          {ev.summary}
+        </div>
+        {ev.attendees.length > 0 && (
+          <div className="mt-0.5 truncate text-xs text-stone-500">
+            {ev.attendees
+              .map((a) => a.name ?? a.email ?? "?")
+              .slice(0, 4)
+              .join(", ")}
+            {ev.attendees.length > 4 && ` +${ev.attendees.length - 4} more`}
+          </div>
+        )}
+      </div>
+      {ev.dispatched ? (
+        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+          Dispatched
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onToggle(ev.id, ev.skip)}
+          className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+            willJoin
+              ? "border-emerald-400 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200"
+              : "border-stone-300 bg-white text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400"
+          }`}
+        >
+          {willJoin ? "Will join" : "Skip"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function MeetingCardWithRemove({
+  m,
+  onChange,
+}: {
+  m: Meeting;
+  onChange: () => void;
+}) {
+  const [removing, setRemoving] = useState(false);
+  async function remove(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm("Pull DataDonkey out of this meeting?")) return;
+    setRemoving(true);
+    await fetch(`/api/recall/bot/${m.id}/leave`, { method: "POST" });
+    setRemoving(false);
+    onChange();
+  }
+  return (
+    <div className="relative">
+      <MeetingCard m={m} />
+      <button
+        type="button"
+        onClick={remove}
+        disabled={removing}
+        className="absolute right-3 top-3 rounded-full border border-stone-300 bg-white px-2.5 py-0.5 text-[11px] font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
+      >
+        {removing ? "…" : "Remove bot"}
+      </button>
     </div>
   );
 }
@@ -537,6 +860,16 @@ function MeetingCard({ m }: { m: Meeting }) {
         </div>
         <StatusBadge meeting={m} />
       </div>
+
+      {m.pipelineStage && (
+        <div className="mt-2">
+          <PipelineTimeline
+            stages={parsePipelineStages(m.pipelineStages)}
+            currentStage={m.pipelineStage}
+            size="sm"
+          />
+        </div>
+      )}
 
       {m.questions.length > 0 && (
         <ul className="mt-3 space-y-2 border-t border-stone-100 pt-3 dark:border-stone-800">
@@ -993,6 +1326,283 @@ function PrefRow({
       </span>
     </button>
   );
+}
+
+// ----------- pipeline banner / timeline -----------
+
+function PipelineBanner({
+  meetings,
+  onDismiss,
+}: {
+  meetings: Meeting[];
+  onDismiss: () => void;
+}) {
+  // Pick the most relevant meeting for the banner: in-call > pipeline-active > nothing
+  const active = pickActiveMeeting(meetings);
+  if (!active) return null;
+  const isLive = active.status === "in_call" || active.pipelineStage === "listening";
+  const isProcessing =
+    !isLive && !!active.pipelineStage && active.pipelineStage !== "done" && active.pipelineStage !== "failed";
+  const isDone = active.pipelineStage === "done" || active.pipelineStage === "failed";
+  if (isDone && active.pipelineDismissed) return null;
+
+  const participants = parseParticipants(active.participants);
+  const title = active.title ?? humanTitleFromUrl(active.meetingUrl) ?? "your meeting";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`relative mt-4 overflow-hidden rounded-2xl border-2 p-5 sm:p-6 ${
+        isLive
+          ? "border-emerald-400/60 bg-gradient-to-br from-emerald-50 via-teal-50 to-emerald-50 shadow-md dark:border-emerald-500/40 dark:from-emerald-950/30 dark:via-teal-950/20 dark:to-emerald-950/30"
+          : isDone
+            ? "border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
+            : "border-orange-300 bg-gradient-to-br from-orange-50 via-amber-50 to-orange-50 shadow-md dark:border-orange-500/40 dark:from-orange-950/20 dark:via-amber-950/10 dark:to-orange-950/20"
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="relative flex h-3 w-3">
+          {isLive && (
+            <motion.span
+              animate={{ opacity: [1, 0.3, 1], scale: [1, 1.4, 1] }}
+              transition={{ duration: 1.6, repeat: Infinity }}
+              className="absolute inset-0 rounded-full bg-emerald-400/60"
+            />
+          )}
+          <span
+            className={`relative inline-flex h-3 w-3 rounded-full ${
+              isLive ? "bg-emerald-500" : isDone ? "bg-stone-400 dark:bg-stone-600" : "bg-orange-500"
+            }`}
+          />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="text-base font-bold text-stone-900 dark:text-stone-100 sm:text-lg">
+              {isLive
+                ? `DataDonkey is in a meeting with you`
+                : isDone
+                  ? `Follow-up delivered`
+                  : `DataDonkey is wrapping up`}
+            </span>
+            {isLive && (
+              <span className="text-sm text-stone-700 dark:text-stone-300">
+                · <strong className="font-semibold">{title}</strong>
+              </span>
+            )}
+          </div>
+          {(isLive || isProcessing) && (
+            <div className="mt-0.5 text-sm text-stone-600 dark:text-stone-400">
+              {isLive && participants.length > 0 && (
+                <span>
+                  {participants.slice(0, 4).map((p) => p.name).join(", ")}
+                  {participants.length > 4 && ` +${participants.length - 4} more`}
+                  {" · "}
+                </span>
+              )}
+              {isLive && <LiveDuration startedAt={active.createdAt} />}
+              {isProcessing && active.pipelineStageAt && (
+                <span>
+                  {STAGE_DESCS[active.pipelineStage ?? ""] ?? "Working…"}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        <a
+          href={`/dashboard/${active.id}`}
+          className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+            isLive
+              ? "border-emerald-300 bg-white text-emerald-900 hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+              : "border-stone-300 bg-white text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+          }`}
+        >
+          Open meeting →
+        </a>
+        {isDone && (
+          <button
+            type="button"
+            onClick={async () => {
+              await fetch(`/api/meetings/${active.id}/dismiss`, { method: "POST" });
+              onDismiss();
+            }}
+            className="shrink-0 text-xs text-stone-500 hover:text-stone-900 dark:hover:text-stone-200"
+          >
+            Dismiss
+          </button>
+        )}
+      </div>
+
+      <PipelineTimeline
+        stages={parsePipelineStages(active.pipelineStages)}
+        currentStage={active.pipelineStage}
+        size="lg"
+      />
+    </motion.div>
+  );
+}
+
+function pickActiveMeeting(meetings: Meeting[]): Meeting | null {
+  // Priority: in-call > processing > most recent done (un-dismissed)
+  const inCall = meetings.find(
+    (m) => m.status === "in_call" || m.pipelineStage === "listening",
+  );
+  if (inCall) return inCall;
+  const processing = meetings.find(
+    (m) =>
+      m.pipelineStage &&
+      m.pipelineStage !== "done" &&
+      m.pipelineStage !== "failed" &&
+      !isTerminalLogical(m),
+  );
+  // If there's a recently terminated bot still mid-pipeline, surface it.
+  if (processing) return processing;
+  const recentlyDone = meetings.find(
+    (m) =>
+      (m.pipelineStage === "done" || m.pipelineStage === "failed") &&
+      !m.pipelineDismissed &&
+      m.pipelineStageAt &&
+      Date.now() - new Date(m.pipelineStageAt).getTime() < 15 * 60_000,
+  );
+  return recentlyDone ?? null;
+}
+
+function isTerminalLogical(m: Meeting): boolean {
+  return m.pipelineStage === "done" || m.pipelineStage === "failed";
+}
+
+function PipelineTimeline({
+  stages,
+  currentStage,
+  size = "sm",
+}: {
+  stages: PipelineEntry[];
+  currentStage: string | null;
+  size?: "sm" | "lg";
+}) {
+  // Build a row of all known stages, mark which have happened, which is current.
+  const seen = new Map<string, PipelineEntry>();
+  for (const s of stages) seen.set(s.stage, s);
+  const cur = currentStage ?? stages[stages.length - 1]?.stage ?? null;
+
+  const lineStyle = size === "lg" ? "py-4" : "py-2";
+  const iconStyle = size === "lg" ? "h-7 w-7 text-xs" : "h-5 w-5 text-[10px]";
+  const labelStyle = size === "lg" ? "text-xs" : "text-[10px]";
+
+  return (
+    <div className={`mt-3 ${lineStyle}`}>
+      <div className="flex items-center gap-1 sm:gap-2">
+        {PIPELINE_STAGES.map((s, i) => {
+          const entry = seen.get(s);
+          const reached = !!entry;
+          const isCurrent = cur === s && s !== "done";
+          const isFuture = !reached;
+          return (
+            <div key={s} className="flex flex-1 items-center gap-1 sm:gap-2">
+              <div className="flex flex-col items-center gap-1">
+                <div
+                  className={`relative flex shrink-0 items-center justify-center rounded-full font-semibold ${iconStyle} ${
+                    isCurrent
+                      ? "bg-orange-600 text-white shadow-md"
+                      : reached
+                        ? "bg-emerald-500 text-white"
+                        : "border border-stone-300 bg-white text-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-600"
+                  }`}
+                >
+                  {isCurrent ? (
+                    <motion.span
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+                      className="inline-block"
+                    >
+                      ◐
+                    </motion.span>
+                  ) : reached ? (
+                    "✓"
+                  ) : (
+                    String(i + 1)
+                  )}
+                  {isCurrent && (
+                    <motion.span
+                      animate={{ scale: [1, 1.6], opacity: [0.6, 0] }}
+                      transition={{ duration: 1.6, repeat: Infinity }}
+                      className="absolute inset-0 rounded-full bg-orange-500/40"
+                    />
+                  )}
+                </div>
+                {size === "lg" && (
+                  <span
+                    className={`whitespace-nowrap font-medium ${labelStyle} ${
+                      isCurrent
+                        ? "text-orange-700 dark:text-orange-300"
+                        : reached
+                          ? "text-stone-700 dark:text-stone-300"
+                          : "text-stone-400"
+                    }`}
+                  >
+                    {STAGE_LABELS[s]}
+                  </span>
+                )}
+              </div>
+              {i < PIPELINE_STAGES.length - 1 && (
+                <div
+                  className={`h-0.5 flex-1 rounded-full ${
+                    reached && !isFuture && cur && (PIPELINE_STAGES as readonly string[]).indexOf(cur) > i
+                      ? "bg-emerald-400/70 dark:bg-emerald-500/60"
+                      : reached
+                        ? "bg-emerald-300 dark:bg-emerald-600"
+                        : "bg-stone-200 dark:bg-stone-800"
+                  }`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function parsePipelineStages(json: string | null): PipelineEntry[] {
+  if (!json) return [];
+  try {
+    return JSON.parse(json) as PipelineEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function parseParticipants(json: string | null): { name: string; email?: string | null }[] {
+  if (!json) return [];
+  try {
+    return JSON.parse(json) as { name: string; email?: string | null }[];
+  } catch {
+    return [];
+  }
+}
+
+function humanTitleFromUrl(url: string): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.host.includes("meet.google")) return "your Meet call";
+    if (u.host.includes("zoom")) return "your Zoom call";
+    if (u.host.includes("teams.microsoft") || u.host.includes("teams.live")) return "your Teams call";
+  } catch {}
+  return null;
+}
+
+function LiveDuration({ startedAt }: { startedAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const elapsedMs = now - new Date(startedAt).getTime();
+  const totalSec = Math.max(0, Math.floor(elapsedMs / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return <span>{m}m {String(s).padStart(2, "0")}s</span>;
 }
 
 // ----------- helpers -----------

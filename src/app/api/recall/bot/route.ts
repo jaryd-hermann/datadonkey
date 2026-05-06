@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
-import { createBot } from "@/lib/recall";
+import { createBot, getBot } from "@/lib/recall";
 import { readConnection } from "@/lib/connection";
 import { sendFirstCallEmail } from "@/lib/email";
 import { dmAuthedUser, dmUserByEmail } from "@/lib/slack";
+import { setStage } from "@/lib/pipeline";
 
 // Dispatcher: creates the Recall bot and persists a Meeting row. Status
 // changes and the auto-followup pipeline are driven by Recall account-level
@@ -43,6 +44,7 @@ export async function POST(req: NextRequest) {
   const meeting = await prisma.meeting.create({
     data: { recallBotId: bot.id, meetingUrl, status: "joining" },
   });
+  await setStage(meeting.id, "listening", "bot dispatched, waiting to join");
 
   // Lifecycle: first-call email + Slack "I'm joining" DM. Fire-and-forget.
   after(async () => {
@@ -53,9 +55,10 @@ export async function POST(req: NextRequest) {
       const platform = detectPlatform(meetingUrl);
       const meetingLabel = platform === "unknown" ? "your meeting" : `your ${platform} call`;
 
-      // Slack DM (every call)
+      // Slack DM (every call) — owner gets a heads-up that the bot is in.
       if (fresh.slackBotToken) {
-        const text = `Hey, I'm in ${meetingLabel} just chilling. Don't mind me — I'll follow up with some of your data if relevant!`;
+        const owner = fresh.userCompany?.trim() || "your team";
+        const text = `Hey — I'm in ${meetingLabel} as ${owner}'s ${conn.provider.name} instance. Just listening; I'll follow up after with any data points worth knowing.`;
         if (fresh.slackUserId) {
           await dmAuthedUser({
             botToken: fresh.slackBotToken,
@@ -98,10 +101,84 @@ function detectPlatform(url: string): "Zoom" | "Teams" | "Meet" | "unknown" {
 }
 
 export async function GET() {
+  // Reconcile any non-terminal meetings against Recall so stale "Live" rows
+  // don't sit forever when an account-level webhook isn't delivering. We
+  // bound this to ~5 lookups per page-load to keep latency reasonable.
+  const stale = await prisma.meeting.findMany({
+    where: {
+      status: { notIn: ["done", "fatal", "call_ended"] },
+      endedAt: null,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+  });
+  await Promise.all(stale.map((m) => reconcileStatus(m.id, m.recallBotId)));
+
   const meetings = await prisma.meeting.findMany({
     orderBy: { createdAt: "desc" },
-    take: 10,
+    take: 25,
     include: { questions: { orderBy: { createdAt: "desc" } } },
   });
   return NextResponse.json({ meetings });
+}
+
+const TERMINAL = new Set(["done", "fatal", "call_ended"]);
+const IN_CALL = new Set(["in_call_recording", "in_call_not_recording"]);
+
+async function reconcileStatus(meetingId: string, botId: string) {
+  try {
+    const raw = (await getBot(botId)) as Record<string, unknown>;
+    const code = pickLatestCode(raw);
+    if (!code) return;
+    const friendly = IN_CALL.has(code)
+      ? "in_call"
+      : TERMINAL.has(code)
+        ? "done"
+        : code;
+    const m = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!m) return;
+    if (m.status === friendly) return;
+    await prisma.meeting.update({
+      where: { id: meetingId },
+      data: {
+        status: friendly,
+        ...(TERMINAL.has(code) && !m.endedAt ? { endedAt: new Date() } : {}),
+      },
+    });
+    if (TERMINAL.has(code) && !m.followupAttempted) {
+      after(() => triggerAutoFollowup(meetingId));
+    }
+  } catch (err) {
+    console.warn("[reconcile] failed for", botId, err);
+  }
+}
+
+function pickLatestCode(bot: Record<string, unknown>): string | undefined {
+  const direct = (bot.status as Record<string, unknown> | undefined)?.code as
+    | string
+    | undefined;
+  if (typeof direct === "string") return direct;
+  // status_changes array — last entry is most recent
+  const arr = bot.status_changes as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(arr) && arr.length) {
+    const last = arr[arr.length - 1];
+    if (typeof last.code === "string") return last.code as string;
+  }
+  return undefined;
+}
+
+async function triggerAutoFollowup(meetingId: string) {
+  try {
+    await new Promise((r) => setTimeout(r, 8_000));
+    const conn = await prisma.connection.findUnique({ where: { id: "default" } });
+    if (!conn?.prefFollowup) return;
+    const m = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!m || m.followupAttempted) return;
+    if (!m.transcript || !m.transcript.trim()) return;
+    const origin = process.env.APP_URL ?? "http://localhost:3000";
+    const r = await fetch(`${origin}/api/meetings/${meetingId}/followup`, { method: "POST" });
+    if (!r.ok) console.warn("[reconcile] auto-followup failed:", await r.text());
+  } catch (err) {
+    console.error("[reconcile] auto-followup error:", err);
+  }
 }

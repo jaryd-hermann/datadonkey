@@ -76,7 +76,37 @@ model Meeting {
   lastTriggerAt  DateTime?
   // Per-bot conversation history for follow-up question context
   conversation   String?    // JSON: [{role:"user"|"assistant", content:string}]
+
+  // Pipeline timeline (rendered as the big status bar on the dashboard).
+  // pipelineStage: current stage label (one of listening, reviewing,
+  // analyzing, querying, delivering, done, failed).
+  // pipelineStages: JSON array of {stage, ts, ok?} entries marking history.
+  pipelineStage      String?
+  pipelineStageAt    DateTime?
+  pipelineStages     String?
+
+  // Whether the user has dismissed the big status banner once the call is
+  // fully wrapped up. (Optional UX touch — pipeline stays in the meeting card.)
+  pipelineDismissed  Boolean  @default(false)
+
+  // Calendar event we joined for, if dispatched via auto-join.
+  calendarEventId    String?  @unique
+
   questions     Question[]
+}
+
+// Per-event opt-in/out for upcoming calendar events. Default behavior is
+// "join all events with a meeting link"; rows here mark explicit user
+// overrides. We also drop a row in here when an event has been dispatched
+// (botId set) so the cron sync doesn't re-dispatch.
+model CalendarEventPolicy {
+  id          String   @id @default(cuid())
+  eventId     String   @unique
+  skip        Boolean  @default(false)  // user explicitly opted out
+  dispatched  Boolean  @default(false)  // we've already sent a bot
+  botId       String?
+  meetingId   String?
+  updatedAt   DateTime @updatedAt
 }
 
 model Question {

@@ -70,9 +70,22 @@ export async function GET(req: NextRequest) {
       skipped.push({ id: ev.id, reason: `not_now (${minsToStart.toFixed(1)}m)` });
       continue;
     }
-    const existing = await prisma.meeting.findFirst({ where: { meetingUrl: url } });
-    if (existing) {
+    const policy = await prisma.calendarEventPolicy.findUnique({
+      where: { eventId: ev.id },
+    });
+    if (policy?.skip) {
+      skipped.push({ id: ev.id, reason: "user_opted_out" });
+      continue;
+    }
+    if (policy?.dispatched) {
       skipped.push({ id: ev.id, reason: "already_dispatched" });
+      continue;
+    }
+    const existing = await prisma.meeting.findFirst({
+      where: { OR: [{ calendarEventId: ev.id }, { meetingUrl: url }] },
+    });
+    if (existing) {
+      skipped.push({ id: ev.id, reason: "already_dispatched_meeting" });
       continue;
     }
 
@@ -82,13 +95,19 @@ export async function GET(req: NextRequest) {
         botName: provider.name,
         webhookUrl: `${origin}/api/recall/webhook`,
       });
-      await prisma.meeting.create({
+      const m = await prisma.meeting.create({
         data: {
           recallBotId: bot.id,
           meetingUrl: url,
           title: ev.summary ?? null,
           status: "joining",
+          calendarEventId: ev.id,
         },
+      });
+      await prisma.calendarEventPolicy.upsert({
+        where: { eventId: ev.id },
+        create: { eventId: ev.id, dispatched: true, botId: bot.id, meetingId: m.id },
+        update: { dispatched: true, botId: bot.id, meetingId: m.id },
       });
       dispatched.push(ev.id);
     } catch (err) {

@@ -4,6 +4,7 @@ import { askDataTool } from "@/lib/anthropic";
 import { sendChatMessage } from "@/lib/recall";
 import { detectWakeWord } from "@/lib/wakeword";
 import { readConnection } from "@/lib/connection";
+import { setStage } from "@/lib/pipeline";
 
 // Stateless webhook handler designed for Vercel:
 // - All cross-request state (welcome dedup, armed, throttle, conversation) is
@@ -36,13 +37,25 @@ const IN_CALL_CODES = new Set(["in_call_recording", "in_call_not_recording"]);
 
 interface ConversationTurn { role: "user" | "assistant"; content: string; ts: number }
 
-function welcomeMessage(brand: string, prefLive: boolean, prefFollowup: boolean): string {
-  const lines = [`👋 Hi, I'm DataDonkey, your data analyst.`];
-  if (prefLive) {
-    lines.push(`Say "Hey ${brand}, …" clearly and I'll answer in chat. Try: "Hey ${brand}, how many users this week?"`);
-  }
+function welcomeMessage(
+  brand: string,
+  company: string | null,
+  prefLive: boolean,
+  prefFollowup: boolean,
+): string {
+  const owner = company?.trim() || "the team";
+  const lines = [
+    `👋 Hi, I'm ${owner}'s ${brand} instance. I help bring real numbers from ${brand} into the moments where you need them.`,
+  ];
   if (prefFollowup) {
-    lines.push(`After this call, I'll send you a follow-up with any data points worth knowing.`);
+    lines.push(
+      `After this call, I'll quietly review what came up and send a short follow-up with any data points worth knowing — straight from your ${brand} data.`,
+    );
+  }
+  if (prefLive) {
+    lines.push(
+      `If something pops up live and you'd like a number, just ask out loud and I'll do my best.`,
+    );
   }
   if (!process.env.DEEPGRAM_API_KEY) {
     lines.push(`(tip: turn on captions in your meeting so I can hear you)`);
@@ -102,11 +115,18 @@ export async function POST(req: NextRequest) {
       where: { id: meeting.id },
       data: { welcomed: true, status: meeting.status === "joining" ? "in_call" : meeting.status },
     });
+    // Pipeline begins as soon as we hear the first words.
+    await setStage(meeting.id, "listening");
     after(async () => {
       try {
         await sendChatMessage(
           botId,
-          welcomeMessage(provider.name, conn.prefLive, conn.prefFollowup),
+          welcomeMessage(
+            provider.name,
+            conn.userCompany,
+            conn.prefLive,
+            conn.prefFollowup,
+          ),
         );
       } catch (e) {
         console.error("[webhook] welcome failed:", e);
