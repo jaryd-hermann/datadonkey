@@ -476,32 +476,33 @@ function HowItWorks({ providerName }: { providerName: string }) {
 }
 
 function PlatformIcons() {
+  // Official multi-color brand marks via Wikipedia commons (stable hot-link).
   const icons: { src: string; alt: string; tooltip: string }[] = [
     {
-      src: "https://cdn.simpleicons.org/googlemeet/00897B",
+      src: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9b/Google_Meet_icon_%282020%29.svg/512px-Google_Meet_icon_%282020%29.svg.png",
       alt: "Google Meet",
       tooltip: "Google Meet",
     },
     {
-      src: "https://cdn.simpleicons.org/microsoftteams/6264A7",
+      src: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Microsoft_Office_Teams_%282018%E2%80%93present%29.svg/512px-Microsoft_Office_Teams_%282018%E2%80%93present%29.svg.png",
       alt: "Microsoft Teams",
       tooltip: "Microsoft Teams",
     },
     {
-      src: "https://cdn.simpleicons.org/zoom/2D8CFF",
+      src: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Zoom_Communications_Logo.svg/512px-Zoom_Communications_Logo.svg.png",
       alt: "Zoom",
       tooltip: "Zoom",
     },
   ];
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-2">
       {icons.map((i) => (
         <img
           key={i.alt}
           src={i.src}
           alt={i.alt}
           title={i.tooltip}
-          className="h-4 w-4"
+          className="h-5 w-5 object-contain"
         />
       ))}
     </span>

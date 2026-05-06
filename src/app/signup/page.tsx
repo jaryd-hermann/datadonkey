@@ -87,11 +87,30 @@ export default function Signup() {
       const j = await r.json();
       if (j.provider) setProvider(j.provider);
 
-      if (userData.user && j.signedUp) {
-        // Authed + name/company saved — pick up wherever they left off.
+      const u = userData.user;
+      if (!u) return;
+
+      // Prefill name + email from Google/Supabase identity if we have it.
+      // Company isn't in the OAuth payload, so the user still has to type it.
+      const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+      const fullName =
+        (typeof meta.full_name === "string" && meta.full_name) ||
+        (typeof meta.name === "string" && meta.name) ||
+        "";
+      if (j.userName) setName(j.userName);
+      else if (fullName) setName(String(fullName));
+      if (j.userCompany) setCompany(j.userCompany);
+      if (j.userEmail) setEmail(j.userEmail);
+      else if (u.email) setEmail(u.email);
+
+      if (j.signedUp) {
+        // Already onboarded — pick up wherever they left off.
         if (j.connected) setStepIdx(2);
         else setStepIdx(1);
       }
+      // If authed but not signedUp, stay on step 0 so they enter company.
+      // The Continue with Google button will short-circuit since they're
+      // already signed in.
     })();
   }, []);
 
@@ -172,6 +191,15 @@ export default function Signup() {
     }
 
     const supabase = createSupabaseBrowserClient();
+
+    // If they're already authed (e.g. signed in via /login first), don't
+    // re-trigger OAuth — just advance past the auth step.
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData.user) {
+      setBusy(false);
+      go(1);
+      return;
+    }
 
     if (method === "google") {
       const { error } = await supabase.auth.signInWithOAuth({
