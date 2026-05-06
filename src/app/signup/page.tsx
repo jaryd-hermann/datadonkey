@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import confetti from "canvas-confetti";
 import { AppShell } from "@/components/AppShell";
+import { PosthogConnectButton } from "@/components/PosthogConnectButton";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 // Fires confetti from the four corners — used to celebrate completing a
@@ -828,16 +829,11 @@ function ToolStep(props: {
                   any field inputs so it's visually unmissable. */}
               {props.provider.id === "posthog" && (
                 <div className="mb-5">
-                  <a
+                  <PosthogConnectButton
+                    comingSoon
+                    badge="~5× faster"
                     href={`/api/oauth/posthog/start?return=/signup&region=${getRegionFromHost(props.credValues.host)}`}
-                    className="flex w-full items-center justify-center gap-2 rounded-md bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700"
-                  >
-                    <img src="/posthogicon.png" alt="" className="h-4 w-4 object-contain" />
-                    <span>Continue with PostHog</span>
-                    <span className="rounded-full bg-orange-400/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-                      ~5× faster
-                    </span>
-                  </a>
+                  />
                   <p className="mt-2 text-center text-[11px] text-stone-500">
                     One click — works with SSO/SAML. No keys to copy.
                   </p>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { PosthogConnectButton } from "@/components/PosthogConnectButton";
 
 interface CredentialField {
   key: string;
@@ -114,13 +115,12 @@ export default function OnboardingConnect() {
               it. Your data stays in PostHog — DataDonkey just gets a short-lived
               token.
             </p>
-            <a
-              href={`/api/oauth/posthog/start?return=/onboarding/connect&region=${getRegionFromHost(values.host)}`}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700"
-            >
-              <img src="/posthogicon.png" alt="" className="h-4 w-4 object-contain" />
-              <span>Continue with PostHog</span>
-            </a>
+            <div className="mt-4">
+              <PosthogConnectButton
+                comingSoon
+                href={`/api/oauth/posthog/start?return=/onboarding/connect&region=${getRegionFromHost(values.host)}`}
+              />
+            </div>
             <div className="my-5 flex items-center gap-3">
               <hr className="grow border-stone-200 dark:border-stone-800" />
               <span className="text-[10px] uppercase tracking-widest text-stone-500">
