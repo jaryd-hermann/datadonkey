@@ -40,12 +40,15 @@ function buildMcpServerConfig(provider: ProviderConfig, credentials: Credentials
   if (!provider.available || !provider.mcpUrl) return null;
 
   if (provider.id === "posthog") {
-    if (!credentials.apiKey) return null;
+    // OAuth access token takes precedence — same Bearer shape as a PAT but
+    // shorter-lived + auto-refreshed elsewhere.
+    const token = credentials.oauthAccessToken || credentials.apiKey;
+    if (!token) return null;
     return {
       type: "url" as const,
       name: "posthog",
       url: `${provider.mcpUrl}?tools=${POSTHOG_ALLOWED_TOOLS.join(",")}`,
-      authorization_token: credentials.apiKey,
+      authorization_token: token,
     };
   }
 

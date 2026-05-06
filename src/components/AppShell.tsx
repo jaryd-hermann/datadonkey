@@ -10,12 +10,13 @@ interface AppShellProps {
   // The header has different affordances on marketing vs app pages.
   showAppNav?: boolean;
   user?: { name: string | null; company: string | null; email: string | null } | null;
+  isPartner?: boolean;
 }
 
-export function AppShell({ children, showAppNav, user }: AppShellProps) {
+export function AppShell({ children, showAppNav, user, isPartner }: AppShellProps) {
   return (
     <div className="min-h-dvh">
-      <Header showAppNav={showAppNav} user={user ?? null} />
+      <Header showAppNav={showAppNav} user={user ?? null} isPartner={isPartner} />
       <main>{children}</main>
     </div>
   );
@@ -24,9 +25,11 @@ export function AppShell({ children, showAppNav, user }: AppShellProps) {
 function Header({
   showAppNav,
   user,
+  isPartner,
 }: {
   showAppNav?: boolean;
   user: { name: string | null; company: string | null; email: string | null } | null;
+  isPartner?: boolean;
 }) {
   return (
     <header className="relative z-40 border-b border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-800/60 dark:bg-stone-950/80">
@@ -57,11 +60,29 @@ function Header({
               </Link>
             </>
           )}
+          {showAppNav && user && <UpgradePill isPartner={!!isPartner} />}
           <ThemeToggle />
           {showAppNav && user && <ProfileMenu user={user} />}
         </div>
       </div>
     </header>
+  );
+}
+
+function UpgradePill({ isPartner }: { isPartner: boolean }) {
+  return (
+    <Link
+      href="/pricing"
+      title={isPartner ? "You're free as a design partner" : "Upgrade your plan"}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+        isPartner
+          ? "border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200"
+          : "bg-orange-600 text-white shadow-sm hover:bg-orange-700"
+      }`}
+    >
+      <span aria-hidden>{isPartner ? "🎁" : "⚡"}</span>
+      <span>{isPartner ? "Partner — free" : "Upgrade"}</span>
+    </Link>
   );
 }
 

@@ -47,6 +47,15 @@ model Connection {
   googleTokenExpiry  DateTime?
   googleEmail        String?
 
+  // PostHog OAuth (CIMD) state — when present, used as MCP Bearer instead
+  // of the manually-pasted Personal API Key.
+  posthogOauthAccessToken  String?
+  posthogOauthRefreshToken String?
+  posthogOauthExpiresAt    DateTime?
+  posthogOauthScopes       String?
+  posthogOauthRegion       String?    // "us" | "eu" — drives which API host we hit
+  posthogUserId            String?    // PostHog UUID from /api/users/@me/
+
   // Slack OAuth state
   slackConnected    Boolean  @default(false)
   slackTeamName     String?

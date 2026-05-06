@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { getProvider, type ProviderConfig, type ProviderId } from "./providers";
+import { refreshAccessToken } from "./posthog-oauth";
 
 // Per-provider credential bag. Shape depends on the provider — we use a
 // permissive index signature so different providers can store their own keys
@@ -9,6 +10,9 @@ export interface Credentials {
   apiKey?: string;
   projectId?: string;
   host?: string;
+  // PostHog OAuth (when present, takes precedence over apiKey)
+  oauthAccessToken?: string;
+  oauthRegion?: string;
   // Mixpanel + Amplitude (OAuth bearer)
   accessToken?: string;
   region?: string;
@@ -69,13 +73,28 @@ export async function readConnection(): Promise<ConnectionView> {
   }
   const provider = getProvider(row.provider);
   const credentials = parseCredentials(row.credentials);
-  // "Connected" if every credential field marked required has a value.
-  const connected = provider.credentialFields
-    .filter((f) => f.required)
-    .every((f) => {
-      const v = credentials[f.key];
-      return typeof v === "string" && v.length > 0;
-    });
+
+  // Inject the PostHog OAuth access token (refreshing if needed) so callers
+  // see a unified Credentials bag regardless of how the user authed.
+  if (row.provider === "posthog" && row.posthogOauthAccessToken) {
+    const token = await ensureFreshPosthogAccessToken(row);
+    if (token) {
+      credentials.oauthAccessToken = token;
+      if (row.posthogOauthRegion) credentials.oauthRegion = row.posthogOauthRegion;
+    }
+  }
+
+  // "Connected" if every credential field marked required has a value, OR
+  // we have a PostHog OAuth token (which can replace apiKey + projectId).
+  const hasOauth = !!credentials.oauthAccessToken;
+  const connected = hasOauth
+    ? true
+    : provider.credentialFields
+        .filter((f) => f.required)
+        .every((f) => {
+          const v = credentials[f.key];
+          return typeof v === "string" && v.length > 0;
+        });
   return {
     exists: true,
     signedUp: !!(row.userName && row.userCompany),
@@ -119,6 +138,37 @@ export async function saveSignup(input: {
       provider: input.provider,
     },
   });
+}
+
+// Refresh the PostHog access token if it's within 60s of expiry. Persists
+// the new token to the row. Returns the freshest token (refreshed or current).
+async function ensureFreshPosthogAccessToken(row: {
+  posthogOauthAccessToken: string | null;
+  posthogOauthRefreshToken: string | null;
+  posthogOauthExpiresAt: Date | null;
+}): Promise<string | null> {
+  const current = row.posthogOauthAccessToken;
+  if (!current) return null;
+  const expiresAt = row.posthogOauthExpiresAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+  if (expiresAt - Date.now() > 60_000) return current;
+  if (!row.posthogOauthRefreshToken) return current;
+
+  try {
+    const r = await refreshAccessToken(row.posthogOauthRefreshToken);
+    const newExpiresAt = new Date(Date.now() + r.expires_in * 1000);
+    await prisma.connection.update({
+      where: { id: "default" },
+      data: {
+        posthogOauthAccessToken: r.access_token,
+        posthogOauthRefreshToken: r.refresh_token ?? row.posthogOauthRefreshToken,
+        posthogOauthExpiresAt: newExpiresAt,
+      },
+    });
+    return r.access_token;
+  } catch (err) {
+    console.warn("[posthog-oauth] proactive refresh failed:", err);
+    return current;
+  }
 }
 
 export async function saveCredentials(

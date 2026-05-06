@@ -132,7 +132,19 @@ export default function Signup() {
       const params = new URLSearchParams(window.location.search);
       const googleOk = params.get("google") === "ok";
       const slackOk = params.get("slack") === "ok";
+      const posthogOk = params.get("posthog") === "connected";
+      const posthogErr = params.get("posthog_oauth_error");
       let landed: number | null = null;
+      if (posthogOk) {
+        // OAuth flow returned successfully — flag tool as connected and
+        // bounce them to preferences (next step after tool).
+        const next = STEPS.findIndex((s) => s.id === "preferences");
+        landed = next;
+        celebrate();
+      } else if (posthogErr) {
+        setError(`PostHog sign-in didn't work: ${posthogErr}`);
+        landed = STEPS.findIndex((s) => s.id === "tool");
+      }
       if (googleOk) {
         setCalendarConnected(true);
         setCalendarProvider("google");
@@ -154,10 +166,12 @@ export default function Signup() {
         // confetti so the user lands cleanly in the app.
         setTimeout(() => router.push("/dashboard"), 1600);
       }
-      if (googleOk || slackOk) {
+      if (googleOk || slackOk || posthogOk || posthogErr) {
         const url = new URL(window.location.href);
         url.searchParams.delete("google");
         url.searchParams.delete("slack");
+        url.searchParams.delete("posthog");
+        url.searchParams.delete("posthog_oauth_error");
         window.history.replaceState(null, "", url.toString());
       }
 
@@ -848,25 +862,34 @@ function ToolStep(props: {
 
               {props.error && <ErrorBox>{props.error}</ErrorBox>}
 
-              {/* SSO only for PostHog — Mixpanel & Amplitude don't expose
-                  third-party OAuth that DataDonkey can register against. */}
-              {props.provider.id === "posthog" && props.provider.oauthLabel && (
-                <SecondaryButton
-                  type="button"
-                  onClick={props.onSso}
-                  className="mt-4"
+              {/* PostHog OAuth (CIMD) — primary path. ~5x faster than the
+                  manual key paste, and respects org SSO/SAML automatically.
+                  The PAT field below remains as a fallback. */}
+              {props.provider.id === "posthog" && (
+                <a
+                  href={`/api/oauth/posthog/start?return=/signup&region=${getRegionFromHost(props.credValues.host)}`}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700"
                 >
                   <img src="/posthogicon.png" alt="" className="h-4 w-4 object-contain" />
-                  {props.provider.oauthLabel}
-                </SecondaryButton>
+                  <span>Continue with PostHog</span>
+                  <span className="rounded-full bg-orange-400/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                    ~5× faster
+                  </span>
+                </a>
+              )}
+              {props.provider.id === "posthog" && (
+                <p className="mt-2 text-center text-[11px] text-stone-500">
+                  One click — works with SSO/SAML. No keys to copy. Or paste a
+                  Personal API Key below if you prefer.
+                </p>
               )}
               <PrimaryButton
                 type="button"
                 disabled={props.busy}
                 onClick={props.onContinue}
-                className="mt-2"
+                className="mt-3"
               >
-                {props.busy ? "Validating…" : "Connect & continue"}
+                {props.busy ? "Validating…" : "Use API key & continue"}
               </PrimaryButton>
             </div>
           </motion.div>
@@ -1451,6 +1474,12 @@ function Toggle({
       </span>
     </button>
   );
+}
+
+function getRegionFromHost(host: string | undefined): "us" | "eu" {
+  if (!host) return "us";
+  if (host.includes("eu.posthog.com")) return "eu";
+  return "us";
 }
 
 function readCookie(name: string): string | null {

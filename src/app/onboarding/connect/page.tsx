@@ -96,7 +96,42 @@ export default function OnboardingConnect() {
           </p>
         )}
 
-        <form onSubmit={submit} className="mt-10 space-y-5">
+        {provider.id === "posthog" && (
+          <div className="mt-8 rounded-2xl border-2 border-orange-500 bg-gradient-to-br from-orange-50 to-amber-50 p-5 dark:border-orange-500/40 dark:from-orange-950/20 dark:to-amber-950/10">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-orange-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                Recommended
+              </span>
+              <span className="text-xs text-stone-600 dark:text-stone-400">
+                ~5× faster than the manual key flow
+              </span>
+            </div>
+            <h2 className="mt-3 text-base font-bold text-stone-900 dark:text-stone-100">
+              Sign in with PostHog
+            </h2>
+            <p className="mt-1 text-sm text-stone-700 dark:text-stone-300">
+              One click. Works with SSO/SAML/Google/GitHub if your org enforces
+              it. Your data stays in PostHog — DataDonkey just gets a short-lived
+              token.
+            </p>
+            <a
+              href={`/api/oauth/posthog/start?return=/onboarding/connect&region=${getRegionFromHost(values.host)}`}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700"
+            >
+              <img src="/posthogicon.png" alt="" className="h-4 w-4 object-contain" />
+              <span>Continue with PostHog</span>
+            </a>
+            <div className="my-5 flex items-center gap-3">
+              <hr className="grow border-stone-200 dark:border-stone-800" />
+              <span className="text-[10px] uppercase tracking-widest text-stone-500">
+                or paste a Personal API Key
+              </span>
+              <hr className="grow border-stone-200 dark:border-stone-800" />
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={submit} className="mt-6 space-y-5">
           {visibleFields.map((f) => (
             <label key={f.key} className="block">
               <span className="text-sm font-medium text-stone-700 dark:text-stone-300">
@@ -201,4 +236,10 @@ function RegionPicker({
       )}
     </div>
   );
+}
+
+function getRegionFromHost(host: string | undefined): "us" | "eu" {
+  if (!host) return "us";
+  if (host.includes("eu.posthog.com")) return "eu";
+  return "us";
 }
