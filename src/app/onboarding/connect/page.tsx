@@ -117,7 +117,7 @@ export default function OnboardingConnect() {
             </p>
             <div className="mt-4">
               <PosthogConnectButton
-                comingSoon
+                comingSoon={false}
                 href={`/api/oauth/posthog/start?return=/onboarding/connect&region=${getRegionFromHost(values.host)}`}
               />
             </div>

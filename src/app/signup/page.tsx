@@ -830,7 +830,7 @@ function ToolStep(props: {
               {props.provider.id === "posthog" && (
                 <div className="mb-5">
                   <PosthogConnectButton
-                    comingSoon
+                    comingSoon={false}
                     badge="~5× faster"
                     href={`/api/oauth/posthog/start?return=/signup&region=${getRegionFromHost(props.credValues.host)}`}
                   />

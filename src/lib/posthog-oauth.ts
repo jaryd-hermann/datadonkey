@@ -12,23 +12,20 @@ export const REGION_API_HOST: Record<PosthogRegion, string> = {
   eu: "https://eu.posthog.com",
 };
 
-// Two ways to identify ourselves to PostHog OAuth:
-//
-//   1. POSTHOG_OAUTH_CLIENT_ID (a UUID/string registered via PostHog's
-//      Django admin). Required today — PostHog Cloud's regional hosts
-//      (us.posthog.com / eu.posthog.com) don't yet accept URL-as-client-id.
-//   2. CIMD URL fallback (forward-compat). The /.well-known/oauth-client
-//      doc is hosted regardless; the moment PostHog ships CIMD support
-//      we get it for free.
-//
-// If POSTHOG_OAUTH_CLIENT_SECRET is also set, the token exchange will
-// include it (confidential client). Otherwise we send only PKCE
-// (public client).
+// CIMD origin must be the canonical hostname that does NOT redirect.
+// On Vercel apex `datadonkey.ai` 307s to `www.datadonkey.ai`, which
+// breaks CIMD because the URL itself IS our identity — a redirect can
+// look like a different identifier to OAuth servers.
+export function canonicalOrigin(): string {
+  return process.env.POSTHOG_CIMD_ORIGIN ?? "https://www.datadonkey.ai";
+}
+
+// POSTHOG_OAUTH_CLIENT_ID lets us swap to a registered UUID if PostHog
+// support hands one out instead. Otherwise our client_id IS the CIMD URL.
 export function clientId(): string {
   const registered = process.env.POSTHOG_OAUTH_CLIENT_ID?.trim();
   if (registered) return registered;
-  const origin = process.env.APP_URL ?? "https://datadonkey.ai";
-  return `${origin}/.well-known/oauth-client`;
+  return `${canonicalOrigin()}/.well-known/oauth-client`;
 }
 
 export function clientSecret(): string | null {
@@ -37,9 +34,26 @@ export function clientSecret(): string | null {
 }
 
 export function redirectUri(): string {
-  const origin = process.env.APP_URL ?? "https://datadonkey.ai";
-  return `${origin}/auth/callback/posthog`;
+  return `${canonicalOrigin()}/auth/callback/posthog`;
 }
+
+// Scopes requested. openid+email+profile for SSO identity; the rest
+// unlock MCP read access so the same access_token works for both
+// authentication AND data queries (no separate Personal API Key).
+export const POSTHOG_OAUTH_SCOPE = [
+  "openid",
+  "email",
+  "profile",
+  "query:read",
+  "insight:read",
+  "dashboard:read",
+  "feature_flag:read",
+  "experiment:read",
+  "action:read",
+  "cohort:read",
+  "error_tracking:read",
+  "session_recording:read",
+].join(" ");
 
 function base64url(input: Buffer | Uint8Array): string {
   return Buffer.from(input)
@@ -78,7 +92,7 @@ export function buildAuthorizeUrl(opts: AuthorizeUrlOpts): string {
     code_challenge: opts.codeChallenge,
     code_challenge_method: "S256",
     state: opts.state,
-    scope: opts.scope ?? "openid email profile",
+    scope: opts.scope ?? POSTHOG_OAUTH_SCOPE,
   });
   return `${POSTHOG_OAUTH_BASE}/oauth/authorize?${params.toString()}`;
 }
