@@ -137,12 +137,47 @@ export default function Signup() {
     (async () => {
       const supabase = createSupabaseBrowserClient();
       const { data: userData } = await supabase.auth.getUser();
+      const u = userData.user;
+
+      // If we have a stashed signup form from a pre-auth OAuth/magic-link
+      // start, persist it now that we have a session. This is the path for
+      // brand-new users completing the Account step.
+      if (u && typeof window !== "undefined") {
+        const pending = sessionStorage.getItem("dd_pending_signup");
+        if (pending) {
+          try {
+            await fetch("/api/connection", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(JSON.parse(pending)),
+            });
+            const partnerVerified = readCookie("partner_verified") === "1";
+            const partnerCode = readCookie("partner_code") ?? undefined;
+            if (partnerVerified) {
+              await fetch("/api/connection", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  isPartner: true,
+                  partnerCodeUsed: partnerCode,
+                }),
+              });
+            }
+          } catch (err) {
+            console.error("[signup] pending POST failed:", err);
+          }
+          sessionStorage.removeItem("dd_pending_signup");
+        }
+      }
+
       const r = await fetch("/api/connection");
       const j = await r.json();
       if (j.provider) setProvider(j.provider);
 
-      const u = userData.user;
-      if (!u) return;
+      if (!u) {
+        setBootstrapping(false);
+        return;
+      }
 
       // Prefill name + email from Google/Supabase identity if we have it.
       // Company isn't in the OAuth payload, so the user still has to type it.
@@ -216,9 +251,11 @@ export default function Signup() {
         setStepIdx(landed);
         setMaxStep((m) => Math.max(m, landed));
       } else if (j.signedUp) {
-        // Authed + name/company saved — start at the data tool step.
-        setStepIdx(1);
-        setMaxStep((m) => Math.max(m, 1));
+        // Returning user (already has name + company saved) — route them to
+        // the dashboard. The dashboard already handles partial state for
+        // tool / calendar / slack better than re-running the wizard.
+        router.replace("/dashboard");
+        return;
       }
       // If authed but not signedUp, stay on step 0 so they enter company.
       setBootstrapping(false);
@@ -294,48 +331,52 @@ export default function Signup() {
     }
 
     setBusy(true);
-    // Persist name/company/role/orgSize so they survive the auth round-trip.
     const partnerVerified = readCookie("partner_verified") === "1";
     const partnerCode = readCookie("partner_code") ?? undefined;
-    const persist = await fetch("/api/connection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userName: name.trim(),
-        userCompany: company.trim(),
-        userEmail: email.trim() || undefined,
-        userRole: role || undefined,
-        orgSize: orgSize || undefined,
-        provider: tool,
-      }),
-    });
-    if (partnerVerified) {
-      // Mark them as a partner via PATCH (POST doesn't accept these fields).
-      await fetch("/api/connection", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          isPartner: true,
-          partnerCodeUsed: partnerCode,
-        }),
-      });
-    }
-    if (!persist.ok) {
-      const j = await persist.json();
-      setBusy(false);
-      setError(j.error ?? "Failed");
-      return;
-    }
+    const formData = {
+      userName: name.trim(),
+      userCompany: company.trim(),
+      userEmail: email.trim() || undefined,
+      userRole: role || undefined,
+      orgSize: orgSize || undefined,
+      provider: tool,
+    };
 
     const supabase = createSupabaseBrowserClient();
-
-    // If they're already authed (e.g. signed in via /login first), don't
-    // re-trigger OAuth — just advance past the auth step.
     const { data: userData } = await supabase.auth.getUser();
+
+    // Path A: already authed (signed in via /login or returning from another
+    // OAuth flow) — POST works because the API can read the session. Save
+    // and advance.
     if (userData.user) {
+      const persist = await fetch("/api/connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+      if (!persist.ok) {
+        const j = await persist.json();
+        setBusy(false);
+        setError(j.error ?? "Failed");
+        return;
+      }
+      if (partnerVerified) {
+        await fetch("/api/connection", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isPartner: true, partnerCodeUsed: partnerCode }),
+        });
+      }
       setBusy(false);
       go(1);
       return;
+    }
+
+    // Path B: brand-new user. We can't POST yet (no session → 401). Stash
+    // form values in sessionStorage so the post-auth mount effect can
+    // persist them once we have a userId.
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("dd_pending_signup", JSON.stringify(formData));
     }
 
     if (method === "google") {
