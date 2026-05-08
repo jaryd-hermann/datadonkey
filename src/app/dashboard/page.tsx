@@ -93,6 +93,7 @@ export default function Dashboard() {
   const [conn, setConn] = useState<ConnectionInfo | null>(null);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [tab, setTab] = useState<TabId>("meetings");
+  const [oauthBanner, setOauthBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   async function load() {
     const [c, m] = await Promise.all([
@@ -116,6 +117,24 @@ export default function Dashboard() {
   useEffect(() => {
     const fromHash = window.location.hash.replace("#", "") as TabId;
     if (TAB_IDS.includes(fromHash)) setTab(fromHash);
+
+    // OAuth return markers — focus the relevant tab + show a success toast.
+    const params = new URLSearchParams(window.location.search);
+    const phOk = params.get("posthog") === "connected";
+    const phErr = params.get("posthog_oauth_error");
+    if (phOk) {
+      setTab("tool");
+      setOauthBanner({ kind: "ok", text: "PostHog connected via SSO. The same token now powers your follow-ups." });
+    } else if (phErr) {
+      setTab("tool");
+      setOauthBanner({ kind: "err", text: `PostHog sign-in didn't complete: ${phErr}` });
+    }
+    if (phOk || phErr) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("posthog");
+      url.searchParams.delete("posthog_oauth_error");
+      window.history.replaceState(null, "", url.toString());
+    }
   }, []);
   useEffect(() => {
     if (typeof window !== "undefined") window.history.replaceState(null, "", `#${tab}`);
@@ -136,6 +155,27 @@ export default function Dashboard() {
       isPartner={conn.isPartner}
     >
       <div className="mx-auto max-w-5xl px-6 py-8">
+        {oauthBanner && (
+          <div
+            className={`mb-4 flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+              oauthBanner.kind === "ok"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-100"
+                : "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-100"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span aria-hidden>{oauthBanner.kind === "ok" ? "✓" : "✗"}</span>
+              <span className="font-medium">{oauthBanner.text}</span>
+            </div>
+            <button
+              onClick={() => setOauthBanner(null)}
+              className="rounded px-2 py-0.5 text-xs opacity-70 transition hover:opacity-100"
+              aria-label="Dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <ProgressNav tab={tab} setTab={setTab} conn={conn} />
