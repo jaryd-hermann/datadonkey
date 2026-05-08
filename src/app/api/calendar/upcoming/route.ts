@@ -69,13 +69,18 @@ export async function GET() {
         email: a.email ?? null,
         name: a.displayName ?? null,
       })),
+      organizerSelf: !!e.organizer?.self,
       skip: p?.skip ?? false,
       dispatched: p?.dispatched ?? false,
       meetingId: p?.meetingId ?? null,
     };
   });
 
-  return NextResponse.json({ events: enriched, connected: true });
+  return NextResponse.json({
+    events: enriched,
+    connected: true,
+    autojoinPolicy: conn.calendarAutojoinPolicy ?? "all",
+  });
 }
 
 // PATCH /api/calendar/upcoming  { eventId, skip }

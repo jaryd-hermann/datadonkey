@@ -590,13 +590,17 @@ interface UpcomingEvent {
   start: string | null;
   end: string | null;
   attendees: { email: string | null; name: string | null }[];
+  organizerSelf: boolean;
   skip: boolean;
   dispatched: boolean;
   meetingId: string | null;
 }
 
+type AutojoinPolicy = "all" | "host_only" | "off";
+
 function UpcomingEvents({ conn }: { conn: ConnectionInfo }) {
   const [events, setEvents] = useState<UpcomingEvent[] | null>(null);
+  const [policy, setPolicy] = useState<AutojoinPolicy>("all");
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -604,6 +608,7 @@ function UpcomingEvents({ conn }: { conn: ConnectionInfo }) {
       const r = await fetch("/api/calendar/upcoming");
       const j = await r.json();
       if (j.events) setEvents(j.events as UpcomingEvent[]);
+      if (j.autojoinPolicy) setPolicy(j.autojoinPolicy as AutojoinPolicy);
       if (j.error) setError(j.error);
     } catch (err) {
       setError(String(err));
@@ -658,8 +663,15 @@ function UpcomingEvents({ conn }: { conn: ConnectionInfo }) {
         Upcoming on your calendar
       </h3>
       <p className="mt-1 text-xs text-stone-500">
-        {conn.provider.name} will join meetings with a video link unless you
-        opt out below.
+        {policy === "off" && (
+          <>Auto-join is disabled. {conn.provider.name} won&apos;t join any of these.</>
+        )}
+        {policy === "host_only" && (
+          <>{conn.provider.name} will join only meetings you&apos;re hosting.</>
+        )}
+        {policy === "all" && (
+          <>{conn.provider.name} will join meetings with a video link unless you opt out below.</>
+        )}
       </p>
       <div className="mt-3 space-y-5">
         {grouped.map((g) => (
@@ -672,7 +684,12 @@ function UpcomingEvents({ conn }: { conn: ConnectionInfo }) {
             </h4>
             <div className="mt-2 space-y-2">
               {g.events.map((e) => (
-                <UpcomingEventRow key={e.id} ev={e} onToggle={toggle} />
+                <UpcomingEventRow
+                  key={e.id}
+                  ev={e}
+                  policy={policy}
+                  onToggle={toggle}
+                />
               ))}
             </div>
           </section>
@@ -714,9 +731,11 @@ function groupUpcomingByDay(
 
 function UpcomingEventRow({
   ev,
+  policy,
   onToggle,
 }: {
   ev: UpcomingEvent;
+  policy: AutojoinPolicy;
   onToggle: (id: string, skip: boolean) => void;
 }) {
   const time = ev.start
@@ -725,12 +744,27 @@ function UpcomingEventRow({
         minute: "2-digit",
       })
     : "";
-  const willJoin = !ev.skip && !ev.dispatched;
+
+  // Reasons we'd skip this event, in order of precedence:
+  // 1. Already dispatched → no choice (badge instead of button)
+  // 2. Autojoin policy is "off" → won't join, no per-event toggle
+  // 3. Autojoin policy is "host_only" and user isn't organizer → skip silently
+  // 4. User opted out per-event → skip
+  // Otherwise: will join (toggleable).
+  let label: "Will join" | "Skip" | "Not host" | "Off" = ev.skip ? "Skip" : "Will join";
+  if (policy === "off") label = "Off";
+  else if (policy === "host_only" && !ev.organizerSelf) label = "Not host";
+  else if (ev.skip) label = "Skip";
+  else label = "Will join";
+
+  const willJoin = label === "Will join";
+  const policyLocked = label === "Off" || label === "Not host";
+
   return (
     <div
       className={`flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 transition ${
-        ev.skip
-          ? "border-stone-200 bg-stone-50 opacity-70 dark:border-stone-800 dark:bg-stone-900/50"
+        !willJoin
+          ? "border-stone-200 bg-stone-50 opacity-80 dark:border-stone-800 dark:bg-stone-900/50"
           : "border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
       }`}
     >
@@ -755,6 +789,17 @@ function UpcomingEventRow({
         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
           Dispatched
         </span>
+      ) : policyLocked ? (
+        <span
+          title={
+            label === "Off"
+              ? "Auto-join is disabled in your settings"
+              : "You're not the organizer of this meeting"
+          }
+          className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-medium text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400"
+        >
+          {label}
+        </span>
       ) : (
         <button
           type="button"
@@ -765,7 +810,7 @@ function UpcomingEventRow({
               : "border-stone-300 bg-white text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400"
           }`}
         >
-          {willJoin ? "Will join" : "Skip"}
+          {label}
         </button>
       )}
     </div>
