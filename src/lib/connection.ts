@@ -32,6 +32,7 @@ export interface ConnectionView {
   prefFollowup: boolean;
   calendarConnected: boolean;
   calendarProvider: string | null;
+  calendarAutojoinPolicy: "all" | "host_only" | "off";
   slackConnected: boolean;
   slackTeamName: string | null;
   slackBotToken: string | null;
@@ -60,10 +61,11 @@ export async function readConnection(): Promise<ConnectionView> {
       userEmail: null,
       provider: getProvider("posthog"),
       credentials: {},
-      prefLive: false,
+      prefLive: true,
       prefFollowup: true,
       calendarConnected: false,
       calendarProvider: null,
+      calendarAutojoinPolicy: "all",
       slackConnected: false,
       slackTeamName: null,
       slackBotToken: null,
@@ -108,6 +110,10 @@ export async function readConnection(): Promise<ConnectionView> {
     prefFollowup: row.prefFollowup,
     calendarConnected: row.calendarConnected,
     calendarProvider: row.calendarProvider,
+    calendarAutojoinPolicy: (row.calendarAutojoinPolicy as
+      | "all"
+      | "host_only"
+      | "off") ?? "all",
     slackConnected: row.slackConnected,
     slackTeamName: row.slackTeamName,
     slackBotToken: row.slackBotToken,

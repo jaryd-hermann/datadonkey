@@ -62,6 +62,7 @@ export async function GET() {
     prefFollowup: conn.prefFollowup,
     calendarConnected: conn.calendarConnected,
     calendarProvider: conn.calendarProvider,
+    calendarAutojoinPolicy: conn.calendarAutojoinPolicy,
     slackConnected: conn.slackConnected,
     slackTeamName: conn.slackTeamName,
   });
@@ -77,6 +78,12 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.calendarConnected === "boolean") update.calendarConnected = body.calendarConnected;
   if (typeof body.calendarProvider === "string" || body.calendarProvider === null) {
     update.calendarProvider = body.calendarProvider;
+  }
+  if (
+    typeof body.calendarAutojoinPolicy === "string" &&
+    ["all", "host_only", "off"].includes(body.calendarAutojoinPolicy)
+  ) {
+    update.calendarAutojoinPolicy = body.calendarAutojoinPolicy;
   }
   if (typeof body.slackConnected === "boolean") update.slackConnected = body.slackConnected;
   if (typeof body.slackTeamName === "string" || body.slackTeamName === null) {

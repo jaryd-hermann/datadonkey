@@ -84,6 +84,7 @@ interface ConnectionInfo {
   prefFollowup: boolean;
   calendarConnected: boolean;
   calendarProvider: string | null;
+  calendarAutojoinPolicy: "all" | "host_only" | "off";
   slackConnected: boolean;
   slackTeamName: string | null;
 }
@@ -1176,6 +1177,11 @@ function ToolTab({
 }
 
 function CalendarTab({ conn, onChange }: { conn: ConnectionInfo; onChange: () => void }) {
+  const [policy, setPolicy] = useState<"all" | "host_only" | "off">(
+    conn.calendarAutojoinPolicy ?? "all",
+  );
+  const [saving, setSaving] = useState(false);
+
   async function disconnect() {
     await fetch("/api/connection", {
       method: "PATCH",
@@ -1188,23 +1194,72 @@ function CalendarTab({ conn, onChange }: { conn: ConnectionInfo; onChange: () =>
     onChange();
   }
 
+  async function setAutojoin(p: "all" | "host_only" | "off") {
+    setPolicy(p);
+    setSaving(true);
+    try {
+      await fetch("/api/connection", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ calendarAutojoinPolicy: p }),
+      });
+      onChange();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Card title="Calendar">
       <p className="text-sm text-stone-700 dark:text-stone-300">
         Auto-join meetings on your calendar. We only read events with a meeting link.
       </p>
       {conn.calendarConnected ? (
-        <div className="mt-4 flex items-center gap-3">
-          <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-            Connected · {conn.calendarProvider}
-          </span>
-          <button
-            onClick={disconnect}
-            className="text-sm text-stone-500 hover:text-stone-900 dark:hover:text-stone-200"
-          >
-            Disconnect
-          </button>
-        </div>
+        <>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+              Connected · {conn.calendarProvider}
+            </span>
+            <button
+              onClick={disconnect}
+              className="text-sm text-stone-500 hover:text-stone-900 dark:hover:text-stone-200"
+            >
+              Disconnect
+            </button>
+          </div>
+
+          <div className="mt-6 rounded-lg border border-stone-200 bg-stone-50 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-stone-500">
+              Auto-join policy
+            </h3>
+            <div className="mt-3 space-y-2">
+              <PolicyOption
+                value="all"
+                current={policy}
+                onSelect={setAutojoin}
+                disabled={saving}
+                title="Join all my meetings"
+                desc="DataDonkey joins every event with a meeting link."
+              />
+              <PolicyOption
+                value="host_only"
+                current={policy}
+                onSelect={setAutojoin}
+                disabled={saving}
+                title="Only meetings I'm hosting"
+                desc="Joins when you're the organizer. Skips invites you accepted."
+              />
+              <PolicyOption
+                value="off"
+                current={policy}
+                onSelect={setAutojoin}
+                disabled={saving}
+                title="Disable auto-join"
+                desc="DataDonkey won't auto-join. You can still invite it manually."
+              />
+            </div>
+          </div>
+        </>
       ) : (
         <div className="mt-4">
           <a
@@ -1217,6 +1272,54 @@ function CalendarTab({ conn, onChange }: { conn: ConnectionInfo; onChange: () =>
         </div>
       )}
     </Card>
+  );
+}
+
+function PolicyOption({
+  value,
+  current,
+  onSelect,
+  disabled,
+  title,
+  desc,
+}: {
+  value: "all" | "host_only" | "off";
+  current: "all" | "host_only" | "off";
+  onSelect: (v: "all" | "host_only" | "off") => void;
+  disabled: boolean;
+  title: string;
+  desc: string;
+}) {
+  const selected = current === value;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onSelect(value)}
+      className={`flex w-full items-start gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
+        selected
+          ? "border-orange-400 bg-orange-50 dark:border-orange-600 dark:bg-orange-950/30"
+          : "border-stone-200 bg-white hover:border-stone-300 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700"
+      } disabled:opacity-60`}
+    >
+      <span
+        className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+          selected
+            ? "border-orange-500 bg-orange-500"
+            : "border-stone-300 bg-white dark:border-stone-600 dark:bg-stone-800"
+        }`}
+      >
+        {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-stone-900 dark:text-stone-100">
+          {title}
+        </span>
+        <span className="mt-0.5 block text-xs text-stone-600 dark:text-stone-400">
+          {desc}
+        </span>
+      </span>
+    </button>
   );
 }
 

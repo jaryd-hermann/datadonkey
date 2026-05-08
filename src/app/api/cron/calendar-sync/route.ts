@@ -17,6 +17,9 @@ export async function GET(req: NextRequest) {
   if (!conn?.calendarConnected || !conn.googleAccessToken) {
     return NextResponse.json({ ok: false, reason: "calendar_not_connected" });
   }
+  if (conn.calendarAutojoinPolicy === "off") {
+    return NextResponse.json({ ok: false, reason: "autojoin_disabled" });
+  }
 
   // Refresh access token if it's expiring within 60s
   let accessToken = conn.googleAccessToken;
@@ -68,6 +71,10 @@ export async function GET(req: NextRequest) {
     const minsToStart = (start.getTime() - Date.now()) / 60_000;
     if (minsToStart > 2 || minsToStart < -10) {
       skipped.push({ id: ev.id, reason: `not_now (${minsToStart.toFixed(1)}m)` });
+      continue;
+    }
+    if (conn.calendarAutojoinPolicy === "host_only" && !ev.organizer?.self) {
+      skipped.push({ id: ev.id, reason: "host_only_not_organizer" });
       continue;
     }
     const policy = await prisma.calendarEventPolicy.findUnique({

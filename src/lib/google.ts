@@ -89,7 +89,8 @@ export interface CalendarEvent {
   conferenceData?: {
     entryPoints?: { uri?: string; entryPointType?: string }[];
   };
-  attendees?: { email?: string; displayName?: string }[];
+  attendees?: { email?: string; displayName?: string; self?: boolean }[];
+  organizer?: { email?: string; self?: boolean };
 }
 
 export async function listUpcomingEvents(

@@ -31,9 +31,12 @@ model Connection {
   credentials  String?
 
   // Preferences (at least one must be true to make sense of the product).
-  // Hey-PostHog live mode is opt-in (rough UX); fast-follows is the default.
-  prefLive     Boolean  @default(false)
+  prefLive     Boolean  @default(true)
   prefFollowup Boolean  @default(true)
+
+  // Calendar autojoin policy: "all" (default), "host_only", or "off".
+  // Used by /api/cron/calendar-sync to decide whether to dispatch a bot.
+  calendarAutojoinPolicy String @default("all")
 
   // Lifecycle emails — set on send so we don't double-send
   welcomeEmailedAt    DateTime?
