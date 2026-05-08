@@ -824,6 +824,8 @@ function AuthStep(props: {
             value={props.email}
             onChange={(e) => props.setEmail(e.target.value)}
             placeholder="alex@acme.com"
+            autoComplete="off"
+            name="dd-work-email"
           />
         </Field>
 

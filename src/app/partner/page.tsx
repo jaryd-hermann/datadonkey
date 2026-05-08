@@ -57,12 +57,13 @@ export default function PartnerGate() {
     }, 1600);
   }
 
-  // If they already verified once on this device, push them straight through
-  // — no need to gate them every visit. The middleware still enforces the
-  // cookie, so this is just a UX shortcut.
+  // If they already verified once on this device, surface that visibly
+  // rather than silently teleporting them past the gate — otherwise it
+  // looks like the gate is broken when a 30-day-old cookie is present.
+  const [alreadyVerified, setAlreadyVerified] = useState(false);
   useEffect(() => {
     if (typeof document !== "undefined" && document.cookie.includes("partner_verified=1")) {
-      window.location.href = "/signup";
+      setAlreadyVerified(true);
     }
   }, []);
 
@@ -117,7 +118,23 @@ export default function PartnerGate() {
             </div>
           </div>
 
-          {!verified && (
+          {alreadyVerified && !verified && (
+            <div className="mt-8 rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-6 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-100">
+              <div className="text-base font-bold">✓ You&apos;re already verified.</div>
+              <p className="mt-1 text-sm">
+                You signed up as a design partner on this device before. Pick
+                up where you left off:
+              </p>
+              <a
+                href="/signup"
+                className="mt-3 inline-block rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+              >
+                Continue to signup →
+              </a>
+            </div>
+          )}
+
+          {!verified && !alreadyVerified && (
             <form
               onSubmit={submit}
               className="mt-8 rounded-2xl border-2 border-orange-300 bg-gradient-to-br from-orange-50 to-amber-50 p-6 dark:border-orange-500/40 dark:from-orange-950/20 dark:to-amber-950/10"
