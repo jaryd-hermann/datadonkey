@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeSlackCode } from "@/lib/slack";
 import { prisma } from "@/lib/db";
+import { getCurrentUserId } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -16,6 +17,12 @@ export async function GET(req: NextRequest) {
     ? new URL(`${base}?slack=error`, url.origin)
     : new URL(`${base}?slack=error#slack`, url.origin);
 
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return clearOAuthCookies(
+      NextResponse.redirect(new URL(`${base}?slack=unauthorized`, url.origin)),
+    );
+  }
   if (!code || !state || state !== cookieState) {
     return clearOAuthCookies(NextResponse.redirect(errorUrl));
   }
@@ -25,9 +32,9 @@ export async function GET(req: NextRequest) {
   try {
     const tok = await exchangeSlackCode(code, redirectUri);
     await prisma.connection.upsert({
-      where: { id: "default" },
+      where: { userId },
       create: {
-        id: "default",
+        userId,
         slackConnected: true,
         slackTeamId: tok.team_id,
         slackTeamName: tok.team_name,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { readConnection } from "@/lib/connection";
+import { getCurrentUserId } from "@/lib/auth";
 
 // OAuth + magic-link redirects land here. Exchange the code for a session,
 // then route based on onboarding state: new users → /signup to finish
@@ -24,7 +25,11 @@ export async function GET(req: NextRequest) {
   // Decide where to send them. If they haven't completed onboarding
   // (no name/company on the connection), send to /signup so the wizard
   // resumes at the right step. Otherwise honor `next=` or default to dashboard.
-  const conn = await readConnection();
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+  const conn = await readConnection(userId);
   const target = !conn.signedUp ? "/signup" : (nextParam ?? "/dashboard");
   return NextResponse.redirect(new URL(target, req.url));
 }

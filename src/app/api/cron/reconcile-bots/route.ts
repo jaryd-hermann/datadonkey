@@ -71,11 +71,11 @@ function pickLatestCode(bot: Record<string, unknown>): string | undefined {
 async function triggerAutoFollowup(meetingId: string) {
   try {
     await new Promise((r) => setTimeout(r, 8_000));
-    const conn = await prisma.connection.findUnique({ where: { id: "default" } });
-    if (!conn?.prefFollowup) return;
     const m = await prisma.meeting.findUnique({ where: { id: meetingId } });
     if (!m || m.followupAttempted) return;
     if (!m.transcript || !m.transcript.trim()) return;
+    const conn = await prisma.connection.findUnique({ where: { userId: m.userId } });
+    if (!conn?.prefFollowup) return;
     const origin = process.env.APP_URL ?? "http://localhost:3000";
     await fetch(`${origin}/api/meetings/${meetingId}/followup`, { method: "POST" });
   } catch (err) {

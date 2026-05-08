@@ -8,10 +8,12 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// Single-tenant prototype: there is exactly one Connection row.
-// id is hardcoded to "default" so we can upsert.
+// Multi-tenant: exactly one Connection per Supabase auth user, keyed by
+// userId. The id field is a cuid for internal references; userId is the
+// real lookup key.
 model Connection {
-  id           String   @id @default("default")
+  id           String   @id @default(cuid())
+  userId       String   @unique
 
   // Mock signup info
   userName     String?
@@ -72,6 +74,7 @@ model Connection {
 
 model Meeting {
   id            String     @id @default(cuid())
+  userId        String     // Supabase auth user — scopes ownership
   recallBotId   String     @unique
   meetingUrl    String
   title         String?
@@ -126,12 +129,15 @@ model Meeting {
 // (botId set) so the cron sync doesn't re-dispatch.
 model CalendarEventPolicy {
   id          String   @id @default(cuid())
-  eventId     String   @unique
+  userId      String   // Supabase auth user — scopes ownership
+  eventId     String
   skip        Boolean  @default(false)  // user explicitly opted out
   dispatched  Boolean  @default(false)  // we've already sent a bot
   botId       String?
   meetingId   String?
   updatedAt   DateTime @updatedAt
+
+  @@unique([userId, eventId])
 }
 
 model Question {

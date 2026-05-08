@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeGoogleCode, getGoogleUserEmail } from "@/lib/google";
 import { prisma } from "@/lib/db";
+import { getCurrentUserId } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -18,6 +19,12 @@ export async function GET(req: NextRequest) {
     ? new URL(`${base}?google=error`, url.origin)
     : new URL(`${base}?google=error#calendar`, url.origin);
 
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return clearOAuthCookies(
+      NextResponse.redirect(new URL(`${base}?google=unauthorized`, url.origin)),
+    );
+  }
   if (!code || !state || state !== cookieState) {
     return clearOAuthCookies(NextResponse.redirect(errorUrl));
   }
@@ -29,9 +36,9 @@ export async function GET(req: NextRequest) {
     const email = await getGoogleUserEmail(tok.access_token);
     const expiry = new Date(Date.now() + tok.expires_in * 1000);
     await prisma.connection.upsert({
-      where: { id: "default" },
+      where: { userId },
       create: {
-        id: "default",
+        userId,
         calendarConnected: true,
         calendarProvider: "google",
         googleAccessToken: tok.access_token,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireUserId } from "@/lib/auth";
 
 const REGION = process.env.RECALL_REGION ?? "us-west-2";
 const BASE_URL = `https://${REGION}.recall.ai`;
@@ -11,9 +12,13 @@ export async function POST(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireUserId();
+  if (auth instanceof NextResponse) return auth;
+  const userId = auth;
+
   const { id } = await ctx.params;
   const meeting = await prisma.meeting.findUnique({ where: { id } });
-  if (!meeting) {
+  if (!meeting || meeting.userId !== userId) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   const key = process.env.RECALL_API_KEY;

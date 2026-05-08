@@ -82,12 +82,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  const conn = await readConnection();
-  if (!conn.slackBotToken || !conn.slackConnected) {
+  // Look up the right user's connection by Slack workspace id. If multiple
+  // users in the same workspace installed DataDonkey, we pick the most recent.
+  if (!payload.team_id) {
+    return NextResponse.json({ ok: true });
+  }
+  const connRow = await prisma.connection.findFirst({
+    where: {
+      slackTeamId: payload.team_id,
+      slackConnected: true,
+      slackBotToken: { not: null },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  if (!connRow) {
     return NextResponse.json({ ok: true });
   }
   // Skip messages from our own bot user
-  if (ev.user && conn.slackBotUserId && ev.user === conn.slackBotUserId) {
+  if (ev.user && connRow.slackBotUserId && ev.user === connRow.slackBotUserId) {
     return NextResponse.json({ ok: true });
   }
 
@@ -102,7 +114,9 @@ export async function POST(req: NextRequest) {
   const threadTs = ev.thread_ts ?? ev.ts;
 
   // Ack within 3s — process the actual question after returning
-  after(() => handleSlackMessage(channel, threadTs, cleanText, conn.slackBotToken!));
+  after(() =>
+    handleSlackMessage(channel, threadTs, cleanText, connRow.slackBotToken!, connRow.userId),
+  );
 
   return NextResponse.json({ ok: true });
 }
@@ -112,10 +126,11 @@ async function handleSlackMessage(
   threadTs: string | undefined,
   text: string,
   botToken: string,
+  userId: string,
 ) {
   const t0 = Date.now();
   try {
-    const conn = await readConnection();
+    const conn = await readConnection(userId);
     if (!conn.connected) {
       await postSlackMessage({
         botToken,

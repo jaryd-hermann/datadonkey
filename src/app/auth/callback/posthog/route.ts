@@ -7,6 +7,7 @@ import {
   REGION_API_HOST,
   type PosthogRegion,
 } from "@/lib/posthog-oauth";
+import { getCurrentUserId } from "@/lib/auth";
 
 // GET /auth/callback/posthog?code=…&state=…
 // Validates state, swaps code for tokens, fetches user identity + first
@@ -29,6 +30,15 @@ export async function GET(req: NextRequest) {
     for (const name of ["ph_oauth_state", "ph_oauth_verifier", "ph_oauth_region", "ph_oauth_return"]) {
       res.cookies.delete(name);
     }
+  }
+
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    const target = new URL(ret, url);
+    target.searchParams.set("posthog_oauth_error", "not_signed_in");
+    const res = NextResponse.redirect(target);
+    clearCookies(res);
+    return res;
   }
 
   if (errorParam) {
@@ -80,7 +90,7 @@ export async function GET(req: NextRequest) {
   // for backward compatibility but the OAuth columns take precedence.
   // Make sure credentials.host + projectId reflect what OAuth gave us so the
   // tool tab shows correct connection state without re-entering anything.
-  const existing = await prisma.connection.findUnique({ where: { id: "default" } });
+  const existing = await prisma.connection.findUnique({ where: { userId } });
   const creds = (() => {
     try {
       return existing?.credentials ? (JSON.parse(existing.credentials) as Record<string, string>) : {};
@@ -94,9 +104,9 @@ export async function GET(req: NextRequest) {
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
   await prisma.connection.upsert({
-    where: { id: "default" },
+    where: { userId },
     create: {
-      id: "default",
+      userId,
       provider: "posthog",
       credentials: JSON.stringify(creds),
       posthogOauthAccessToken: tokens.access_token,

@@ -128,18 +128,16 @@ async function processEvent(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true });
   }
 
-  const conn = await readConnection();
-  const provider = conn.provider;
-
-  // First time we see any transcript chunk for this bot, send the welcome.
-  // Welcome state is persisted on Meeting.welcomed so this is safe across
-  // serverless invocations.
+  // Find the meeting first — its userId scopes which connection's data tool
+  // we use. Without this we'd accidentally cross tenants.
   const meeting = await prisma.meeting.findUnique({
     where: { recallBotId: botId },
   });
   if (!meeting) {
     return NextResponse.json({ ok: true });
   }
+  const conn = await readConnection(meeting.userId);
+  const provider = conn.provider;
   if (!meeting.welcomed) {
     await prisma.meeting.update({
       where: { id: meeting.id },
@@ -273,8 +271,9 @@ async function handleQuestion(
   console.log(`[wake] bot=${botId} q="${question}"`);
 
   const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
-  const conn = await readConnection();
-  if (!meeting || !conn.exists) return;
+  if (!meeting) return;
+  const conn = await readConnection(meeting.userId);
+  if (!conn.exists) return;
 
   try { await sendChatMessage(botId, "👀 looking that up…"); } catch {}
 
@@ -370,11 +369,11 @@ async function triggerAutoFollowup(meetingId: string) {
   try {
     // Give Recall a moment to flush any final transcript chunks.
     await new Promise((r) => setTimeout(r, 8_000));
-    const conn = await prisma.connection.findUnique({ where: { id: "default" } });
-    if (!conn?.prefFollowup) return;
     const m = await prisma.meeting.findUnique({ where: { id: meetingId } });
     if (!m || m.followupAttempted) return;
     if (!m.transcript || !m.transcript.trim()) return;
+    const conn = await prisma.connection.findUnique({ where: { userId: m.userId } });
+    if (!conn?.prefFollowup) return;
     const origin = process.env.APP_URL ?? "http://localhost:3000";
     const r = await fetch(`${origin}/api/meetings/${meetingId}/followup`, { method: "POST" });
     if (!r.ok) console.warn("[auto-followup] failed", await r.text());

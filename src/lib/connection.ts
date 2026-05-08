@@ -23,6 +23,7 @@ export interface ConnectionView {
   exists: boolean;
   signedUp: boolean;
   connected: boolean;
+  userId: string;
   userName: string | null;
   userCompany: string | null;
   userEmail: string | null;
@@ -49,13 +50,14 @@ function parseCredentials(s: string | null): Credentials {
   }
 }
 
-export async function readConnection(): Promise<ConnectionView> {
-  const row = await prisma.connection.findUnique({ where: { id: "default" } });
+export async function readConnection(userId: string): Promise<ConnectionView> {
+  const row = await prisma.connection.findUnique({ where: { userId } });
   if (!row) {
     return {
       exists: false,
       signedUp: false,
       connected: false,
+      userId,
       userName: null,
       userCompany: null,
       userEmail: null,
@@ -79,7 +81,7 @@ export async function readConnection(): Promise<ConnectionView> {
   // Inject the PostHog OAuth access token (refreshing if needed) so callers
   // see a unified Credentials bag regardless of how the user authed.
   if (row.provider === "posthog" && row.posthogOauthAccessToken) {
-    const token = await ensureFreshPosthogAccessToken(row);
+    const token = await ensureFreshPosthogAccessToken(row.id, row);
     if (token) {
       credentials.oauthAccessToken = token;
       if (row.posthogOauthRegion) credentials.oauthRegion = row.posthogOauthRegion;
@@ -101,6 +103,7 @@ export async function readConnection(): Promise<ConnectionView> {
     exists: true,
     signedUp: !!(row.userName && row.userCompany),
     connected,
+    userId: row.userId,
     userName: row.userName,
     userCompany: row.userCompany,
     userEmail: row.userEmail,
@@ -123,15 +126,16 @@ export async function readConnection(): Promise<ConnectionView> {
 }
 
 export async function saveSignup(input: {
+  userId: string;
   userName: string;
   userCompany: string;
   userEmail?: string;
   provider: ProviderId;
 }): Promise<void> {
   await prisma.connection.upsert({
-    where: { id: "default" },
+    where: { userId: input.userId },
     create: {
-      id: "default",
+      userId: input.userId,
       userName: input.userName,
       userCompany: input.userCompany,
       userEmail: input.userEmail ?? null,
@@ -148,11 +152,14 @@ export async function saveSignup(input: {
 
 // Refresh the PostHog access token if it's within 60s of expiry. Persists
 // the new token to the row. Returns the freshest token (refreshed or current).
-async function ensureFreshPosthogAccessToken(row: {
-  posthogOauthAccessToken: string | null;
-  posthogOauthRefreshToken: string | null;
-  posthogOauthExpiresAt: Date | null;
-}): Promise<string | null> {
+async function ensureFreshPosthogAccessToken(
+  rowId: string,
+  row: {
+    posthogOauthAccessToken: string | null;
+    posthogOauthRefreshToken: string | null;
+    posthogOauthExpiresAt: Date | null;
+  },
+): Promise<string | null> {
   const current = row.posthogOauthAccessToken;
   if (!current) return null;
   const expiresAt = row.posthogOauthExpiresAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
@@ -163,7 +170,7 @@ async function ensureFreshPosthogAccessToken(row: {
     const r = await refreshAccessToken(row.posthogOauthRefreshToken);
     const newExpiresAt = new Date(Date.now() + r.expires_in * 1000);
     await prisma.connection.update({
-      where: { id: "default" },
+      where: { id: rowId },
       data: {
         posthogOauthAccessToken: r.access_token,
         posthogOauthRefreshToken: r.refresh_token ?? row.posthogOauthRefreshToken,
@@ -178,13 +185,14 @@ async function ensureFreshPosthogAccessToken(row: {
 }
 
 export async function saveCredentials(
+  userId: string,
   provider: ProviderId,
   credentials: Credentials,
 ): Promise<void> {
   await prisma.connection.upsert({
-    where: { id: "default" },
+    where: { userId },
     create: {
-      id: "default",
+      userId,
       provider,
       credentials: JSON.stringify(credentials),
     },

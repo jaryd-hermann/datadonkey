@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireUserId();
+  if (auth instanceof NextResponse) return auth;
+  const userId = auth;
+
   const { id } = await ctx.params;
   const meeting = await prisma.meeting.findUnique({
     where: { id },
     include: { questions: { orderBy: { createdAt: "asc" } } },
   });
-  if (!meeting) {
+  if (!meeting || meeting.userId !== userId) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 

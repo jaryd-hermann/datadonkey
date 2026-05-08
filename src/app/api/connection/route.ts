@@ -3,9 +3,14 @@ import { prisma } from "@/lib/db";
 import { readConnection, saveCredentials, saveSignup } from "@/lib/connection";
 import { getProvider, type ProviderId } from "@/lib/providers";
 import { sendWelcomeEmail, addToResendAudience } from "@/lib/email";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
-  const conn = await readConnection();
+  const auth = await requireUserId();
+  if (auth instanceof NextResponse) return auth;
+  const userId = auth;
+
+  const conn = await readConnection(userId);
   // Best-effort: surface PostHog org/project name for the connection card.
   let projectName: string | null = null;
   let organizationName: string | null = null;
@@ -35,7 +40,7 @@ export async function GET() {
   }
   // Pull additional flat fields directly so we don't need to thread them
   // through ConnectionView: role, orgSize, isPartner.
-  const row = await prisma.connection.findUnique({ where: { id: "default" } });
+  const row = await prisma.connection.findUnique({ where: { userId } });
   return NextResponse.json({
     exists: conn.exists,
     signedUp: conn.signedUp,
@@ -70,6 +75,10 @@ export async function GET() {
 
 // Partial update of preferences + mock OAuth state (calendar / slack).
 export async function PATCH(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth instanceof NextResponse) return auth;
+  const userId = auth;
+
   const body = await req.json().catch(() => ({}));
   const update: Record<string, string | boolean | null> = {};
 
@@ -102,7 +111,7 @@ export async function PATCH(req: NextRequest) {
 
   // Enforce: at least one preference must be enabled.
   if (update.prefLive === false || update.prefFollowup === false) {
-    const cur = await prisma.connection.findUnique({ where: { id: "default" } });
+    const cur = await prisma.connection.findUnique({ where: { userId } });
     const live = update.prefLive !== undefined ? Boolean(update.prefLive) : (cur?.prefLive ?? true);
     const fu = update.prefFollowup !== undefined ? Boolean(update.prefFollowup) : (cur?.prefFollowup ?? true);
     if (!live && !fu) {
@@ -114,15 +123,19 @@ export async function PATCH(req: NextRequest) {
   }
 
   await prisma.connection.upsert({
-    where: { id: "default" },
-    create: { id: "default", ...update },
+    where: { userId },
+    create: { userId, ...update },
     update,
   });
   return NextResponse.json({ ok: true });
 }
 
-// Mock signup: stores name/company/email/provider. No real auth.
+// Signup: stores name/company/email/provider keyed to the Supabase user id.
 export async function POST(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth instanceof NextResponse) return auth;
+  const userId = auth;
+
   const body = await req.json().catch(() => ({}));
   const userName = String(body?.userName ?? "").trim();
   const userCompany = String(body?.userCompany ?? "").trim();
@@ -137,12 +150,12 @@ export async function POST(req: NextRequest) {
     );
   }
   // Detect first-time signup so we can fire the welcome email exactly once.
-  const before = await prisma.connection.findUnique({ where: { id: "default" } });
+  const before = await prisma.connection.findUnique({ where: { userId } });
   const wasNew = !before?.welcomeEmailedAt;
-  await saveSignup({ userName, userCompany, userEmail, provider });
+  await saveSignup({ userId, userName, userCompany, userEmail, provider });
   if (userRole || orgSize) {
     await prisma.connection.update({
-      where: { id: "default" },
+      where: { userId },
       data: {
         ...(userRole ? { userRole } : {}),
         ...(orgSize ? { orgSize } : {}),
@@ -156,7 +169,7 @@ export async function POST(req: NextRequest) {
         const r = await sendWelcomeEmail({ to: userEmail, name: userName });
         if (r.sent) {
           await prisma.connection.update({
-            where: { id: "default" },
+            where: { userId },
             data: { welcomeEmailedAt: new Date() },
           });
         }
@@ -173,6 +186,10 @@ export async function POST(req: NextRequest) {
 // Save credentials for the chosen provider. Validates via a tool-specific
 // probe when possible; we only do this for PostHog right now.
 export async function PUT(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth instanceof NextResponse) return auth;
+  const userId = auth;
+
   const body = await req.json().catch(() => ({}));
   const providerId = String(body?.provider ?? "posthog") as ProviderId;
   const provider = getProvider(providerId);
@@ -210,7 +227,7 @@ export async function PUT(req: NextRequest) {
   }
   // Mixpanel/Amplitude: no live MCP yet, just save.
 
-  await saveCredentials(providerId, credentials);
+  await saveCredentials(userId, providerId, credentials);
   return NextResponse.json({ ok: true });
 }
 
@@ -218,8 +235,12 @@ export async function PUT(req: NextRequest) {
 // signup info (name, company, etc.) and other tool connections (Slack, calendar)
 // intact so the user only loses the data tool wiring.
 export async function DELETE() {
+  const auth = await requireUserId();
+  if (auth instanceof NextResponse) return auth;
+  const userId = auth;
+
   await prisma.connection.update({
-    where: { id: "default" },
+    where: { userId },
     data: {
       credentials: null,
       posthogOauthAccessToken: null,

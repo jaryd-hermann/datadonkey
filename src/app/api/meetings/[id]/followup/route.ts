@@ -27,7 +27,7 @@ export async function POST(
   if (!meeting) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const conn = await readConnection();
+  const conn = await readConnection(meeting.userId);
   if (!conn.connected) {
     return NextResponse.json(
       { error: "Data tool not connected" },
