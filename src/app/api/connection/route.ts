@@ -12,16 +12,18 @@ export async function GET() {
 
   const conn = await readConnection(userId);
   // Best-effort: surface PostHog org/project name for the connection card.
+  // Works with either a Personal API Key OR an OAuth access token — both
+  // authenticate as Bearer to PostHog's REST API.
   let projectName: string | null = null;
   let organizationName: string | null = null;
   if (conn.connected && conn.provider.id === "posthog") {
-    const apiKey = conn.credentials.apiKey;
+    const bearer = conn.credentials.oauthAccessToken ?? conn.credentials.apiKey;
     const projectId = conn.credentials.projectId;
     const host = conn.credentials.host || "https://us.posthog.com";
-    if (apiKey && projectId) {
+    if (bearer && projectId) {
       try {
         const r = await fetch(`${host}/api/projects/${projectId}/`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
+          headers: { Authorization: `Bearer ${bearer}` },
           // 5s budget — never block dashboard load on PostHog
           signal: AbortSignal.timeout(5000),
         });

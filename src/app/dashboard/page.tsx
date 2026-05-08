@@ -1118,7 +1118,7 @@ function ToolTab({
           </p>
           <div className="mt-4">
             <PosthogConnectButton
-              href="/api/oauth/posthog/start"
+              href="/api/oauth/posthog/start?return=/dashboard"
               comingSoon={false}
               badge="~5x faster"
             />

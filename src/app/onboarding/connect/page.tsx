@@ -35,6 +35,20 @@ export default function OnboardingConnect() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // If we just came back from a successful PostHog OAuth, the connection
+    // is already wired. Bounce to the dashboard with the success marker so
+    // the user sees the banner there instead of being asked to connect again.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("posthog") === "connected") {
+      router.replace("/dashboard?posthog=connected");
+      return;
+    }
+    if (params.has("posthog_oauth_error")) {
+      const err = params.get("posthog_oauth_error") ?? "unknown_error";
+      router.replace(`/dashboard?posthog_oauth_error=${encodeURIComponent(err)}`);
+      return;
+    }
+
     fetch("/api/connection")
       .then((r) => r.json())
       .then((j: ConnectionInfo) => {

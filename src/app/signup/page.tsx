@@ -250,12 +250,17 @@ export default function Signup() {
       if (landed !== null) {
         setStepIdx(landed);
         setMaxStep((m) => Math.max(m, landed));
-      } else if (j.signedUp) {
-        // Returning user (already has name + company saved) — route them to
-        // the dashboard. The dashboard already handles partial state for
-        // tool / calendar / slack better than re-running the wizard.
+      } else if (j.connected) {
+        // Fully onboarded user (data tool already wired) — they don't need
+        // the wizard again. Send to /dashboard.
         router.replace("/dashboard");
         return;
+      } else if (j.signedUp) {
+        // Brand-new user just finished auth: name + company saved but no
+        // data tool yet. Drop them at the Tool step.
+        const toolIdx = STEPS.findIndex((s) => s.id === "tool");
+        setStepIdx(toolIdx);
+        setMaxStep((m) => Math.max(m, toolIdx));
       }
       // If authed but not signedUp, stay on step 0 so they enter company.
       setBootstrapping(false);
