@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 export default function Landing() {
   return (
@@ -14,6 +18,15 @@ export default function Landing() {
 }
 
 function Hero() {
+  const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    supabase.auth
+      .getUser()
+      .then(({ data }) => setIsAuthed(!!data.user))
+      .catch(() => setIsAuthed(false));
+  }, []);
+
   return (
     <section className="text-center">
       <h1 className="text-4xl font-extrabold tracking-tight text-stone-900 sm:text-6xl dark:text-stone-50">
@@ -25,19 +38,33 @@ function Hero() {
         already use — your data never leaves them.
       </p>
       <div className="mt-9 flex items-center justify-center gap-4">
-        <Link
-          href="/partner"
-          className="inline-flex items-center gap-2 rounded-full bg-orange-600 px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-stone-950"
-        >
-          Connect your data
-          <span aria-hidden>→</span>
-        </Link>
-        <Link
-          href="/login"
-          className="text-sm font-medium text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
-        >
-          Sign in
-        </Link>
+        {isAuthed === true ? (
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-2 rounded-full bg-orange-600 px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-stone-950"
+          >
+            Open dashboard
+            <span aria-hidden>→</span>
+          </Link>
+        ) : (
+          <>
+            <Link
+              href="/partner"
+              className="inline-flex items-center gap-2 rounded-full bg-orange-600 px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-stone-950"
+            >
+              Connect your data
+              <span aria-hidden>→</span>
+            </Link>
+            {isAuthed === false && (
+              <Link
+                href="/login"
+                className="text-sm font-medium text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
+              >
+                Sign in
+              </Link>
+            )}
+          </>
+        )}
       </div>
       <p className="mt-4 text-xs text-stone-500">
         Free for the first 10 design partners.
@@ -148,14 +175,28 @@ function WhoItsFor() {
         ))}
       </ul>
       <div className="mt-12 text-center">
-        <Link
-          href="/partner"
-          className="inline-flex items-center gap-2 rounded-full bg-orange-600 px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-orange-700"
-        >
-          Connect your data
-          <span aria-hidden>→</span>
-        </Link>
+        <RepeatedCTA />
       </div>
     </section>
+  );
+}
+
+function RepeatedCTA() {
+  const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    supabase.auth
+      .getUser()
+      .then(({ data }) => setIsAuthed(!!data.user))
+      .catch(() => setIsAuthed(false));
+  }, []);
+  return (
+    <Link
+      href={isAuthed === true ? "/dashboard" : "/partner"}
+      className="inline-flex items-center gap-2 rounded-full bg-orange-600 px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-orange-700"
+    >
+      {isAuthed === true ? "Open dashboard" : "Connect your data"}
+      <span aria-hidden>→</span>
+    </Link>
   );
 }

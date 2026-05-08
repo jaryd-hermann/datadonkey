@@ -31,6 +31,21 @@ function Header({
   user: { name: string | null; company: string | null; email: string | null } | null;
   isPartner?: boolean;
 }) {
+  // On marketing pages (showAppNav=false) we still want to detect whether
+  // the visitor is signed in — so we can swap "Sign in / Get started" for
+  // "Open dashboard". Without this, an authed user clicking "Get started"
+  // on the homepage gets silently redirected to /dashboard, which feels
+  // like the auth flow is broken.
+  const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (showAppNav) return; // app pages already have user via props
+    const supabase = createSupabaseBrowserClient();
+    supabase.auth
+      .getUser()
+      .then(({ data }) => setIsAuthed(!!data.user))
+      .catch(() => setIsAuthed(false));
+  }, [showAppNav]);
+
   return (
     <header className="relative z-40 border-b border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-800/60 dark:bg-stone-950/80">
       {/* 3-col grid so the wordmark stays centered regardless of how many
@@ -44,7 +59,15 @@ function Header({
           <Wordmark />
         </Link>
         <div className="flex items-center justify-end gap-2">
-          {!showAppNav && (
+          {!showAppNav && isAuthed === true && (
+            <Link
+              href="/dashboard"
+              className="rounded-md bg-stone-900 px-3 py-1.5 text-sm font-medium text-stone-50 hover:bg-stone-800 dark:bg-stone-50 dark:text-stone-900 dark:hover:bg-stone-200"
+            >
+              Open dashboard →
+            </Link>
+          )}
+          {!showAppNav && isAuthed === false && (
             <>
               <Link
                 href="/login"
