@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AppShell } from "@/components/AppShell";
+import { PosthogConnectButton } from "@/components/PosthogConnectButton";
 
 interface Question {
   id: string;
@@ -210,7 +211,7 @@ export default function Dashboard() {
                   onChange={load}
                 />
               )}
-              {tab === "tool" && <ToolTab conn={conn} />}
+              {tab === "tool" && <ToolTab conn={conn} onChange={load} />}
               {tab === "calendar" && <CalendarTab conn={conn} onChange={load} />}
               {tab === "slack" && <SlackTab conn={conn} onChange={load} />}
               {tab === "preferences" && <PreferencesTab conn={conn} onChange={load} />}
@@ -967,7 +968,13 @@ function StatusBadge({ meeting }: { meeting: Meeting }) {
 
 // ----------- secondary tabs -----------
 
-function ToolTab({ conn }: { conn: ConnectionInfo }) {
+function ToolTab({
+  conn,
+  onChange,
+}: {
+  conn: ConnectionInfo;
+  onChange: () => void;
+}) {
   const isPosthog = conn.provider.id === "posthog";
   const iconSrc = isPosthog ? "/posthogicon.png" : null;
   const projectId = conn.credentials?.projectId;
@@ -978,6 +985,19 @@ function ToolTab({ conn }: { conn: ConnectionInfo }) {
       : conn.credentials?.host
         ? "Self-hosted"
         : null;
+  const [confirming, setConfirming] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  async function disconnect() {
+    setDisconnecting(true);
+    try {
+      await fetch("/api/connection", { method: "DELETE" });
+      onChange();
+    } finally {
+      setDisconnecting(false);
+      setConfirming(false);
+    }
+  }
 
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900">
@@ -1042,13 +1062,84 @@ function ToolTab({ conn }: { conn: ConnectionInfo }) {
             </div>
           )}
         </div>
-        <a
-          href="/onboarding/connect"
-          className="shrink-0 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
-        >
-          {conn.connected ? "Reconnect" : `Connect ${conn.provider.name}`}
-        </a>
+        {conn.connected && (
+          <div className="flex shrink-0 items-center gap-2">
+            <a
+              href="/onboarding/connect"
+              className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
+            >
+              Reconnect
+            </a>
+            {!confirming ? (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:bg-stone-900 dark:text-red-300 dark:hover:bg-red-950/30"
+              >
+                Disconnect
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1 dark:border-red-900/40 dark:bg-red-950/30">
+                <span className="text-xs text-red-800 dark:text-red-200">
+                  Sure?
+                </span>
+                <button
+                  type="button"
+                  onClick={disconnect}
+                  disabled={disconnecting}
+                  className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {disconnecting ? "…" : "Yes"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  disabled={disconnecting}
+                  className="rounded px-2 py-0.5 text-xs text-red-800 hover:bg-red-100 disabled:opacity-50 dark:text-red-200 dark:hover:bg-red-900/40"
+                >
+                  No
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Inline reconnect UI when disconnected — same dual-path as onboarding */}
+      {!conn.connected && isPosthog && (
+        <div className="mt-5 rounded-lg border border-orange-200 bg-orange-50/60 p-5 dark:border-orange-900/40 dark:bg-orange-950/20">
+          <h3 className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+            Reconnect your data tool
+          </h3>
+          <p className="mt-1 text-xs text-stone-600 dark:text-stone-400">
+            Until you reconnect, DataDonkey can&apos;t answer data questions or
+            send follow-ups.
+          </p>
+          <div className="mt-4">
+            <PosthogConnectButton
+              href="/api/oauth/posthog/start"
+              comingSoon={false}
+              badge="~5x faster"
+            />
+            <p className="mt-2 text-center text-[11px] text-stone-500 dark:text-stone-400">
+              One click — works with SSO/SAML. No keys to copy.
+            </p>
+          </div>
+          <div className="my-5 flex items-center gap-3">
+            <div className="h-px flex-1 bg-stone-200 dark:bg-stone-800" />
+            <span className="text-[11px] uppercase tracking-wider text-stone-400">
+              Or the longer way
+            </span>
+            <div className="h-px flex-1 bg-stone-200 dark:bg-stone-800" />
+          </div>
+          <a
+            href="/onboarding/connect"
+            className="block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-center text-sm font-medium text-stone-900 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:hover:bg-stone-800"
+          >
+            Use a Personal API Key →
+          </a>
+        </div>
+      )}
 
       {/* What this means — DataDonkey's role */}
       <div className="mt-6 rounded-lg border border-stone-100 bg-amber-50/60 p-4 dark:border-stone-800 dark:bg-amber-950/10">

@@ -207,6 +207,24 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json({ ok: true });
 }
 
+// Disconnect the data source: clear credentials + OAuth tokens. Leaves the
+// signup info (name, company, etc.) and other tool connections (Slack, calendar)
+// intact so the user only loses the data tool wiring.
+export async function DELETE() {
+  await prisma.connection.update({
+    where: { id: "default" },
+    data: {
+      credentials: null,
+      posthogOauthAccessToken: null,
+      posthogOauthRefreshToken: null,
+      posthogOauthExpiresAt: null,
+      posthogOauthRegion: null,
+      posthogOauthScopes: null,
+    },
+  });
+  return NextResponse.json({ ok: true });
+}
+
 function redactCredentials(c: Record<string, unknown>) {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(c)) {
