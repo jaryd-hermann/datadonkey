@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
-  discoverFirstProject,
   exchangeCode,
   getMe,
+  getProject,
   REGION_API_HOST,
   type PosthogRegion,
 } from "@/lib/posthog-oauth";
@@ -79,12 +79,23 @@ export async function GET(req: NextRequest) {
     return res;
   }
 
-  // Discover identity + first project so the user doesn't need to type a
-  // project ID after OAuth.
+  // PostHog OAuth tokens are scoped to specific project IDs. The token
+  // response carries the list as `scoped_teams`. We use the first one as
+  // the canonical project, then fetch its name + org via the
+  // project-scoped endpoint (the listing /api/projects/ is forbidden for
+  // OAuth tokens).
+  const firstTeamId = tokens.scoped_teams?.[0];
   const [me, project] = await Promise.all([
     getMe(tokens.access_token, region).catch(() => null),
-    discoverFirstProject(tokens.access_token, region).catch(() => null),
+    firstTeamId != null
+      ? getProject(tokens.access_token, region, firstTeamId).catch(() => null)
+      : Promise.resolve(null),
   ]);
+  if (firstTeamId != null) {
+    console.log(`[posthog-oauth] scoped_teams=${tokens.scoped_teams?.join(",")} first=${firstTeamId}`);
+  } else {
+    console.warn("[posthog-oauth] token response had no scoped_teams");
+  }
 
   // Existing PAT-style credentials live in `credentials` JSON. We keep them
   // for backward compatibility but the OAuth columns take precedence.

@@ -44,9 +44,10 @@ export const POSTHOG_OAUTH_SCOPE = [
   "openid",
   "email",
   "profile",
-  // organization + project scopes are required for /api/projects/ + the
-  // org name lookup. Without them, OAuth users get a connected token but
-  // we can't show project name / org / project ID on the dashboard.
+  // user:read for /api/users/@me/ (identity); organization + project for
+  // project name lookup. Without these the dashboard can't show the user's
+  // project name / org / project ID.
+  "user:read",
   "organization:read",
   "project:read",
   "query:read",
@@ -109,6 +110,12 @@ export interface TokenResponse {
   token_type: string;
   scope?: string;
   id_token?: string;
+  // PostHog OAuth tokens are scoped to specific project IDs (the user
+  // picks them on the consent screen). The token can ONLY query those
+  // projects via project-based endpoints — global endpoints like
+  // /api/projects/ return 403.
+  scoped_teams?: number[];
+  scoped_organizations?: string[];
 }
 
 function tokenBody(extra: Record<string, string>): Record<string, string> {
@@ -177,30 +184,31 @@ export async function getMe(
   };
 }
 
-// Discover the user's first scoped team (project) via the API. Used so we
-// don't need to ask for projectId separately after OAuth.
-export async function discoverFirstProject(
+// Look up a single project by ID — works with OAuth tokens because it's a
+// project-scoped endpoint (the listing endpoint /api/projects/ does NOT
+// work for OAuth tokens, which is why we get the project ID from the
+// token response's scoped_teams instead of listing).
+export async function getProject(
   accessToken: string,
   region: PosthogRegion,
+  projectId: string | number,
 ): Promise<{ id: string; name: string; organizationName: string | null } | null> {
-  const r = await fetch(`${REGION_API_HOST[region]}/api/projects/`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const r = await fetch(
+    `${REGION_API_HOST[region]}/api/projects/${projectId}/`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
   if (!r.ok) {
     const text = await r.text().catch(() => "");
-    console.warn(`[posthog-oauth] /api/projects/ ${r.status}: ${text.slice(0, 200)}`);
+    console.warn(
+      `[posthog-oauth] /api/projects/${projectId}/ ${r.status}: ${text.slice(0, 200)}`,
+    );
     return null;
   }
-  const j = (await r.json()) as { results?: Array<Record<string, unknown>> };
-  const first = (j.results ?? [])[0];
-  if (!first) {
-    console.warn("[posthog-oauth] /api/projects/ returned no results");
-    return null;
-  }
-  const org = first.organization as Record<string, unknown> | undefined;
+  const j = (await r.json()) as Record<string, unknown>;
+  const org = j.organization as Record<string, unknown> | undefined;
   return {
-    id: String(first.id ?? ""),
-    name: String(first.name ?? ""),
+    id: String(j.id ?? projectId),
+    name: typeof j.name === "string" ? j.name : "",
     organizationName: typeof org?.name === "string" ? (org.name as string) : null,
   };
 }
