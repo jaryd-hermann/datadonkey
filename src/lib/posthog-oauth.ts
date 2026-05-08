@@ -44,6 +44,11 @@ export const POSTHOG_OAUTH_SCOPE = [
   "openid",
   "email",
   "profile",
+  // organization + project scopes are required for /api/projects/ + the
+  // org name lookup. Without them, OAuth users get a connected token but
+  // we can't show project name / org / project ID on the dashboard.
+  "organization:read",
+  "project:read",
   "query:read",
   "insight:read",
   "dashboard:read",
@@ -181,10 +186,17 @@ export async function discoverFirstProject(
   const r = await fetch(`${REGION_API_HOST[region]}/api/projects/`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!r.ok) return null;
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    console.warn(`[posthog-oauth] /api/projects/ ${r.status}: ${text.slice(0, 200)}`);
+    return null;
+  }
   const j = (await r.json()) as { results?: Array<Record<string, unknown>> };
   const first = (j.results ?? [])[0];
-  if (!first) return null;
+  if (!first) {
+    console.warn("[posthog-oauth] /api/projects/ returned no results");
+    return null;
+  }
   const org = first.organization as Record<string, unknown> | undefined;
   return {
     id: String(first.id ?? ""),
