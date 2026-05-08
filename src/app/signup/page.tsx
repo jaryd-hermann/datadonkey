@@ -59,11 +59,47 @@ interface ProviderShape {
   setupHint?: string;
 }
 
+// Detect OAuth-return markers synchronously on first render so we don't
+// show step 0 for a flash while the async mount effect figures out where
+// the user should actually land.
+function initialStepFromUrl(): number {
+  if (typeof window === "undefined") return 0;
+  const p = new URLSearchParams(window.location.search);
+  if (p.get("posthog") === "connected") {
+    return STEPS.findIndex((s) => s.id === "preferences");
+  }
+  if (p.get("google") === "ok") {
+    return STEPS.findIndex((s) => s.id === "calendar");
+  }
+  if (p.get("slack") === "ok") {
+    return STEPS.findIndex((s) => s.id === "slack");
+  }
+  if (p.get("posthog_oauth_error")) {
+    return STEPS.findIndex((s) => s.id === "tool");
+  }
+  return 0;
+}
+
+function hasOAuthMarker(): boolean {
+  if (typeof window === "undefined") return false;
+  const p = new URLSearchParams(window.location.search);
+  return [
+    "posthog",
+    "google",
+    "slack",
+    "posthog_oauth_error",
+  ].some((k) => p.has(k));
+}
+
 export default function Signup() {
   const router = useRouter();
-  const [stepIdx, setStepIdx] = useState(0);
-  const [maxStep, setMaxStep] = useState(0);
+  const [stepIdx, setStepIdx] = useState(initialStepFromUrl);
+  const [maxStep, setMaxStep] = useState(initialStepFromUrl);
   const [direction, setDirection] = useState<1 | -1>(1);
+  // Hide the wizard for ~one tick when we're returning from an OAuth flow,
+  // so the user sees a calm "Finishing setup…" screen instead of step 0
+  // briefly flashing before state is reconciled.
+  const [bootstrapping, setBootstrapping] = useState(hasOAuthMarker);
   const step = STEPS[stepIdx].id;
 
   // Step 1 state
@@ -185,6 +221,7 @@ export default function Signup() {
         setMaxStep((m) => Math.max(m, 1));
       }
       // If authed but not signedUp, stay on step 0 so they enter company.
+      setBootstrapping(false);
     })();
     // router is stable; intentionally only run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -417,6 +454,19 @@ export default function Signup() {
   }
 
   // ----------- UI -----------
+
+  if (bootstrapping) {
+    return (
+      <AppShell>
+        <div className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center px-6 py-10 text-center">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-stone-200 border-t-orange-500" />
+          <p className="mt-5 text-sm text-stone-600 dark:text-stone-400">
+            Finishing setup…
+          </p>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
