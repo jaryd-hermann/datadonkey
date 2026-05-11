@@ -435,21 +435,27 @@ export async function analyzeTranscriptWithUsage(
         // Sonnet is plenty for JSON extraction and 3-5x faster than Opus.
         model: "claude-sonnet-4-6",
         max_tokens: 4096,
-        system: `You read meeting transcripts and surface concrete data questions
-that the team would benefit from having answered with PostHog analytics.
+        system: `You read meeting transcripts and extract every concrete, data-shaped
+question raised in the conversation. The follow-up report is the durable record of
+all data discussed in the call, so include questions even if they were answered
+live in-call. Include all three kinds:
+  1. Questions addressed directly to the bot ("Hey PostHog, …", "Hey Post, …")
+  2. Questions raised in monologue (a single speaker thinking out loud)
+  3. Questions raised in team discussion
 
 Rules:
-- Only include questions where the answer would be actionable and where
-  PostHog (event analytics, feature flags, experiments, dashboards, error
-  tracking) could plausibly answer it.
-- Skip rhetorical questions, hypotheticals, opinions, and anything not
-  data-shaped.
-- 0–5 items. If nothing qualifies, return an empty array.
+- Answer must plausibly come from PostHog (event analytics, feature flags,
+  experiments, dashboards, error tracking, session recordings).
+- Skip rhetorical questions, hypotheticals, opinions, and anything not data-shaped.
+- 0–5 items. If genuinely nothing data-shaped came up, return [].
 - Each question must be self-contained (no "this", "that thing", "the X we
-  discussed" — replace with the concrete subject).
+  discussed" — replace with the concrete subject). Reconstruct context from
+  surrounding utterances when needed (e.g. "in the last seven days").
+- Deduplicate near-identical questions, but keep distinct variants
+  (e.g. "how many visitors" and "where did visitors come from" are distinct).
 - Return ONLY a JSON array. No prose, no code fences.
 
-Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence why this came up in the meeting>"}]`,
+Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence why this came up>"}]`,
         messages: [{ role: "user", content: transcript }],
       },
       { signal: ac.signal },
