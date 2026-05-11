@@ -252,7 +252,7 @@ export default function MeetingDetail({
           {noQuestions && (
             <div className="mt-3 rounded-md bg-zinc-50 p-4 text-sm text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
               <div className="font-medium text-zinc-800 dark:text-zinc-200">
-                No data-shaped questions surfaced in this transcript.
+                No follow-up needed — nothing here data could meaningfully help with.
               </div>
               {meeting.noFollowupSummary ? (
                 <div className="mt-3">
@@ -260,7 +260,7 @@ export default function MeetingDetail({
                 </div>
               ) : (
                 <div className="mt-2 text-xs text-zinc-500">
-                  The bot reviewed the transcript and decided nothing data-shaped came up.
+                  The bot reviewed the transcript: nothing was asked, and nothing in the topics warranted a proactive dig.
                 </div>
               )}
             </div>
@@ -310,8 +310,7 @@ export default function MeetingDetail({
             <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
               Follow-up report
             </h2>
-            {/* Hide delivery pills when nothing was sent (e.g. no questions found). */}
-            {!noQuestions && ranOnce && (
+            {ranOnce && (
               <div className="flex items-center gap-2">
                 <DeliveryPill
                   ok={!!meeting.followupEmailedAt}
@@ -330,7 +329,7 @@ export default function MeetingDetail({
             </div>
           ) : noQuestions ? (
             <div className="mt-3 rounded-md bg-zinc-50 p-4 text-sm text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
-              Nothing actionable to share — no follow-up sent.
+              No data follow-up was warranted — see &ldquo;Data questions surfaced&rdquo; above for the recap that was sent.
             </div>
           ) : (
             <>
