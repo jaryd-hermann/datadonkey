@@ -5,6 +5,7 @@ import {
   askDataToolStrategic,
   buildReportPreamble,
   extractPostHogUrls,
+  summarizeNonDataMeetingWithUsage,
   type FollowupQuestion,
 } from "@/lib/anthropic";
 import { recordUsage } from "@/lib/usage";
@@ -84,6 +85,18 @@ async function runFollowup(
   console.log(`[followup] analyzed in ${Date.now() - tStart}ms -> ${identified.length} questions`);
 
   if (identified.length === 0) {
+    // No data-shaped questions — generate a brief themes+reason summary so the
+    // user sees what was discussed and why the bot decided to send nothing.
+    // UI-only signal; we don't email or Slack this.
+    await setStage(id, "analyzing", "summarizing themes");
+    const summary = await summarizeNonDataMeetingWithUsage(meeting.transcript ?? "");
+    await recordUsage(id, {
+      stage: "summary",
+      model: summary.usage.model,
+      inputTokens: summary.usage.inputTokens,
+      outputTokens: summary.usage.outputTokens,
+    });
+    const noFollowupSummary = buildNoFollowupMarkdown(summary);
     await prisma.meeting.update({
       where: { id },
       data: {
@@ -93,10 +106,16 @@ async function runFollowup(
         emailDraft: null,
         emailDraftAt: new Date(),
         followupReport: null,
+        noFollowupSummary,
       },
     });
     await setStage(id, "done", "no follow-up worth sending");
-    return NextResponse.json({ followups: [], emailSubject: null, emailDraft: null });
+    return NextResponse.json({
+      followups: [],
+      emailSubject: null,
+      emailDraft: null,
+      noFollowupSummary,
+    });
   }
 
   // Step 2: strategic-analyst answer per question. Sequential (not parallel)
@@ -264,6 +283,7 @@ async function runFollowup(
       followupReport: report,
       followupEmailedAt: emailedAt,
       followupSlackedAt: slackedAt,
+      noFollowupSummary: null,
     },
   });
 
@@ -286,6 +306,19 @@ async function runFollowup(
     followupReport: report,
     delivered: { email: !!emailedAt, slack: !!slackedAt, emailReason },
   });
+}
+
+function buildNoFollowupMarkdown(s: {
+  themes: string;
+  reason: string;
+}): string {
+  const themes = s.themes.trim();
+  const reason = s.reason.trim();
+  if (!themes && !reason) return "";
+  const sections: string[] = [];
+  if (themes) sections.push(`**Topics discussed**\n\n${themes}`);
+  if (reason) sections.push(`**Why no data follow-ups**\n\n${reason}`);
+  return sections.join("\n\n");
 }
 
 function buildReportMarkdown(args: {
