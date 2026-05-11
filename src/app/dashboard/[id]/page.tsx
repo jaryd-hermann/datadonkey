@@ -42,8 +42,48 @@ interface Meeting {
   followupReport: string | null;
   followupEmailedAt: string | null;
   followupSlackedAt: string | null;
+  followupAttempted?: boolean;
+  noFollowupSummary?: string | null;
+  pipelineStage?: string | null;
+  pipelineStageAt?: string | null;
+  pipelineStages?: string | null;
+  usageJson?: string | null;
+  costUsd?: number | null;
   questions: Question[];
 }
+
+interface PipelineEntry {
+  stage: string;
+  ts: number;
+  ok?: boolean;
+  detail?: string;
+}
+
+interface UsageEntry {
+  stage: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  ts: number;
+  detail?: string;
+}
+
+interface UsageRollup {
+  entries: UsageEntry[];
+  recallSeconds?: number;
+  recallCostUsd?: number;
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  listening: "Listening",
+  reviewing: "Reviewing transcript",
+  analyzing: "Analyzing for data questions",
+  querying: "Querying your data",
+  delivering: "Delivering follow-up",
+  done: "Done",
+  failed: "Failed",
+};
 
 export default function MeetingDetail({
   params,
@@ -195,6 +235,10 @@ export default function MeetingDetail({
           )}
         </section>
 
+        <PipelineStatus meeting={meeting} />
+
+        <RunDetails meeting={meeting} />
+
         {/* 3. Questions (with answers when present) */}
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
@@ -207,7 +251,18 @@ export default function MeetingDetail({
           )}
           {noQuestions && (
             <div className="mt-3 rounded-md bg-zinc-50 p-4 text-sm text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
-              Nothing relevant here — no data-shaped questions surfaced in this transcript.
+              <div className="font-medium text-zinc-800 dark:text-zinc-200">
+                No data-shaped questions surfaced in this transcript.
+              </div>
+              {meeting.noFollowupSummary ? (
+                <div className="mt-3">
+                  <MarkdownView text={meeting.noFollowupSummary} />
+                </div>
+              ) : (
+                <div className="mt-2 text-xs text-zinc-500">
+                  The bot reviewed the transcript and decided nothing data-shaped came up.
+                </div>
+              )}
             </div>
           )}
           {ranOnce && meeting.followups.length > 0 && (
@@ -255,16 +310,19 @@ export default function MeetingDetail({
             <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
               Follow-up report
             </h2>
-            <div className="flex items-center gap-2">
-              <DeliveryPill
-                ok={!!meeting.followupEmailedAt}
-                label={meeting.followupEmailedAt ? "Emailed" : "Email pending"}
-              />
-              <DeliveryPill
-                ok={!!meeting.followupSlackedAt}
-                label={meeting.followupSlackedAt ? "Slacked" : "Slack pending"}
-              />
-            </div>
+            {/* Hide delivery pills when nothing was sent (e.g. no questions found). */}
+            {!noQuestions && ranOnce && (
+              <div className="flex items-center gap-2">
+                <DeliveryPill
+                  ok={!!meeting.followupEmailedAt}
+                  label={meeting.followupEmailedAt ? "Emailed" : "Email pending"}
+                />
+                <DeliveryPill
+                  ok={!!meeting.followupSlackedAt}
+                  label={meeting.followupSlackedAt ? "Slacked" : "Slack pending"}
+                />
+              </div>
+            )}
           </div>
           {!ranOnce ? (
             <div className="mt-3 text-sm text-zinc-500">
@@ -331,6 +389,154 @@ export default function MeetingDetail({
         )}
       </div>
     </AppShell>
+  );
+}
+
+function parsePipelineStages(s: string | null | undefined): PipelineEntry[] {
+  if (!s) return [];
+  try {
+    const parsed = JSON.parse(s) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed as PipelineEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function parseUsageRollup(s: string | null | undefined): UsageRollup | null {
+  if (!s) return null;
+  try {
+    return JSON.parse(s) as UsageRollup;
+  } catch {
+    return null;
+  }
+}
+
+function PipelineStatus({ meeting }: { meeting: Meeting }) {
+  const entries = parsePipelineStages(meeting.pipelineStages);
+  if (entries.length === 0) return null;
+  // Collapse the timeline to one row per stage — show the latest entry for each
+  // stage with its detail, and mark it ok if it's not the latest stage overall.
+  const latestByStage = new Map<string, PipelineEntry>();
+  for (const e of entries) latestByStage.set(e.stage, e);
+  const rows = Array.from(latestByStage.values());
+  const currentStage = meeting.pipelineStage ?? rows[rows.length - 1]?.stage;
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
+        Pipeline status
+      </h2>
+      <ol className="mt-3 space-y-2">
+        {rows.map((e, i) => {
+          const isCurrent = e.stage === currentStage;
+          const isTerminal = e.stage === "done" || e.stage === "failed";
+          const isOk = e.ok === true || (isTerminal && e.stage === "done");
+          const isFailed = e.stage === "failed";
+          let dotClass = "bg-zinc-300 dark:bg-zinc-700";
+          if (isFailed) dotClass = "bg-red-500";
+          else if (isOk) dotClass = "bg-emerald-500";
+          else if (isCurrent) dotClass = "bg-amber-500 animate-pulse";
+          return (
+            <li key={i} className="flex items-start gap-3 text-sm">
+              <span
+                className={`mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full ${dotClass}`}
+              />
+              <div className="flex-1">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                    {STAGE_LABELS[e.stage] ?? e.stage}
+                  </span>
+                  <span className="font-mono text-[11px] text-zinc-500">
+                    {new Date(e.ts).toLocaleTimeString()}
+                  </span>
+                </div>
+                {e.detail && (
+                  <div className="mt-0.5 text-xs text-zinc-500">{e.detail}</div>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function RunDetails({ meeting }: { meeting: Meeting }) {
+  const [open, setOpen] = useState(false);
+  const rollup = parseUsageRollup(meeting.usageJson);
+  if (!rollup || rollup.entries.length === 0) return null;
+  const totalIn = rollup.entries.reduce((s, e) => s + (e.inputTokens ?? 0), 0);
+  const totalOut = rollup.entries.reduce((s, e) => s + (e.outputTokens ?? 0), 0);
+  const totalCost = meeting.costUsd ?? rollup.entries.reduce((s, e) => s + (e.costUsd ?? 0), 0);
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-3 p-6 text-left"
+      >
+        <div>
+          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
+            Run details
+          </h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            {rollup.entries.length} model call{rollup.entries.length === 1 ? "" : "s"} ·{" "}
+            {totalIn.toLocaleString()} in / {totalOut.toLocaleString()} out tokens · $
+            {totalCost.toFixed(4)}
+          </p>
+        </div>
+        <span className="font-mono text-xs text-zinc-500">{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-zinc-500">
+                <th className="pb-2 font-medium">Stage</th>
+                <th className="pb-2 font-medium">Model</th>
+                <th className="pb-2 text-right font-medium">In</th>
+                <th className="pb-2 text-right font-medium">Out</th>
+                <th className="pb-2 text-right font-medium">Cost</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono text-zinc-700 dark:text-zinc-300">
+              {rollup.entries.map((e, i) => (
+                <tr key={i} className="border-t border-zinc-100 dark:border-zinc-800/60">
+                  <td className="py-1.5 pr-3">
+                    <span className="font-sans">{e.stage}</span>
+                    {e.detail && (
+                      <span className="ml-2 font-sans text-[11px] text-zinc-500">
+                        {e.detail}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1.5 pr-3 text-[11px]">{e.model}</td>
+                  <td className="py-1.5 pr-3 text-right">{e.inputTokens.toLocaleString()}</td>
+                  <td className="py-1.5 pr-3 text-right">{e.outputTokens.toLocaleString()}</td>
+                  <td className="py-1.5 text-right">${e.costUsd.toFixed(4)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-zinc-200 dark:border-zinc-800">
+                <td className="pt-2 font-sans text-zinc-500">Total</td>
+                <td />
+                <td className="pt-2 text-right font-mono">{totalIn.toLocaleString()}</td>
+                <td className="pt-2 text-right font-mono">{totalOut.toLocaleString()}</td>
+                <td className="pt-2 text-right font-mono">${totalCost.toFixed(4)}</td>
+              </tr>
+            </tfoot>
+          </table>
+          {rollup.recallSeconds != null && (
+            <div className="mt-3 text-[11px] text-zinc-500">
+              Recall bot: {Math.round(rollup.recallSeconds)}s
+              {rollup.recallCostUsd != null && ` · $${rollup.recallCostUsd.toFixed(4)}`}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

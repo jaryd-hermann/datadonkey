@@ -13,7 +13,7 @@ const RECALL_PER_HOUR_USD = 0.5;
 export type ModelId = keyof typeof PRICING;
 
 export interface UsageEntry {
-  stage: "analyze" | "strategic" | "preamble" | "live" | "other";
+  stage: "analyze" | "strategic" | "preamble" | "summary" | "live" | "other";
   model: string;
   inputTokens: number;
   outputTokens: number;

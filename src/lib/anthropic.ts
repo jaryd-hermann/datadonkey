@@ -299,6 +299,70 @@ Answer it now using the data, with footnotes for the events and date ranges you 
   };
 }
 
+// When analyzeTranscript surfaces zero data questions, we still want to give
+// the user a signal that the bot read the transcript. Summarizes the main
+// themes + why nothing data-shaped came up. UI-only — not emailed.
+export interface NoFollowupSummary {
+  themes: string;  // bulleted markdown — 2-5 brief topics discussed
+  reason: string;  // 1-2 sentence explanation of why no data follow-ups
+  usage: { model: string; inputTokens: number; outputTokens: number };
+}
+
+export async function summarizeNonDataMeetingWithUsage(
+  transcript: string,
+): Promise<NoFollowupSummary> {
+  const empty: NoFollowupSummary = {
+    themes: "",
+    reason: "",
+    usage: { model: "claude-sonnet-4-6", inputTokens: 0, outputTokens: 0 },
+  };
+  if (!transcript.trim()) return empty;
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 30_000);
+  try {
+    const res = await anthropic.messages.create(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 600,
+        system: `The analyzer just decided this meeting has no data-shaped follow-up questions. Your job is to confirm that decision was reasonable by summarizing what the meeting was actually about, in two short sections.
+
+Section 1 — "themes": a bulleted markdown list of 2-5 short topics discussed. Each bullet ONE phrase (max ~10 words). No filler ("they discussed…"), just the topic.
+
+Section 2 — "reason": one or two sentences on why nothing data-shaped surfaced. Be specific to this transcript (e.g. "design-system review with no metrics referenced", "social chitchat with no product questions raised"). Don't hedge.
+
+Return ONLY valid JSON, no prose, no code fences:
+{ "themes": "<markdown bullets>", "reason": "<1-2 sentences>" }`,
+        messages: [{ role: "user", content: transcript }],
+      },
+      { signal: ac.signal },
+    );
+    const text = res.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
+      .join("\n")
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
+    const parsed = JSON.parse(text) as Partial<NoFollowupSummary>;
+    return {
+      themes: typeof parsed.themes === "string" ? parsed.themes : "",
+      reason: typeof parsed.reason === "string" ? parsed.reason : "",
+      usage: {
+        model: "claude-sonnet-4-6",
+        inputTokens: res.usage.input_tokens,
+        outputTokens: res.usage.output_tokens,
+      },
+    };
+  } catch (err) {
+    console.warn("[summarizeNonDataMeeting] failed:", err);
+    return empty;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Synthesize a "Need to know" preamble + instrumentation-gaps callout from
 // the answered follow-up questions. Quick Sonnet call — adds ~5-10s but
 // gives the report a proper TL;DR.

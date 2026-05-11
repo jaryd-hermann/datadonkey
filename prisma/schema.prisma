@@ -92,6 +92,10 @@ model Meeting {
   followupEmailedAt  DateTime?
   followupSlackedAt  DateTime?
   followupAttempted  Boolean    @default(false)
+  // When the analyzer surfaces zero data questions, we still want to give the
+  // user a signal that the bot reviewed the transcript. Stored as markdown:
+  // themes discussed + why nothing data-shaped came up. UI-only — not emailed.
+  noFollowupSummary  String?
   // In-call state, persisted so we work on Vercel (serverless = no shared mem)
   welcomed       Boolean    @default(false)
   armedUntil     DateTime?
