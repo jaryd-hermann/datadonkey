@@ -85,9 +85,11 @@ async function runFollowup(
   console.log(`[followup] analyzed in ${Date.now() - tStart}ms -> ${identified.length} questions`);
 
   if (identified.length === 0) {
-    // No data-shaped questions — generate a brief themes+reason summary so the
-    // user sees what was discussed and why the bot decided to send nothing.
-    // UI-only signal; we don't email or Slack this.
+    // No data-shaped questions — generate a brief themes + judgement summary
+    // so the user sees that the bot reviewed the call and decided nothing
+    // warranted a data dig. We deliver this via email + Slack too: the
+    // confirmation that the product ran is more valuable to a new user than
+    // the silence of "nothing arrived in your inbox."
     await setStage(id, "analyzing", "summarizing themes");
     const summary = await summarizeNonDataMeetingWithUsage(meeting.transcript ?? "");
     await recordUsage(id, {
@@ -97,24 +99,69 @@ async function runFollowup(
       outputTokens: summary.usage.outputTokens,
     });
     const noFollowupSummary = buildNoFollowupMarkdown(summary);
+
+    const titleStr = meeting.title ?? "your meeting";
+    const subject = `DataDonkey check-in: ${titleStr} — no follow-up needed`;
+    const deliveryBody = buildNoFollowupDeliveryMarkdown(meeting.title, noFollowupSummary);
+
+    await setStage(id, "delivering");
+    let emailedAt: Date | null = null;
+    if (conn.userEmail) {
+      const r = await sendFollowupEmail({ to: conn.userEmail, subject, markdown: deliveryBody });
+      if (r.sent) emailedAt = new Date();
+      console.log(`[followup] no-question email to=${conn.userEmail} sent=${r.sent} reason=${r.reason ?? "-"}`);
+    }
+
+    let slackedAt: Date | null = null;
+    if (conn.slackConnected && conn.slackBotToken) {
+      const slackText = `📋 DataDonkey reviewed "${titleStr}" and decided no follow-up was needed.\n\n${deliveryBody}`;
+      let slackRes: { sent: boolean; reason?: string } = { sent: false, reason: "no_target" };
+      if (conn.slackUserId) {
+        slackRes = await dmAuthedUser({
+          botToken: conn.slackBotToken,
+          authedUserId: conn.slackUserId,
+          text: slackText,
+        });
+      } else if (conn.userEmail) {
+        slackRes = await dmUserByEmail({
+          botToken: conn.slackBotToken,
+          email: conn.userEmail,
+          text: slackText,
+        });
+      }
+      if (slackRes.sent) slackedAt = new Date();
+      console.log(`[followup] no-question slack sent=${slackRes.sent} reason=${slackRes.reason ?? "-"}`);
+    }
+
     await prisma.meeting.update({
       where: { id },
       data: {
         followups: JSON.stringify([]),
         followupsAt: new Date(),
-        emailSubject: null,
-        emailDraft: null,
+        emailSubject: subject,
+        emailDraft: deliveryBody,
         emailDraftAt: new Date(),
         followupReport: null,
         noFollowupSummary,
+        followupEmailedAt: emailedAt,
+        followupSlackedAt: slackedAt,
       },
     });
-    await setStage(id, "done", "no follow-up worth sending");
+    const stageDetail =
+      emailedAt && slackedAt
+        ? "no follow-up needed — email + Slack delivered"
+        : emailedAt
+          ? "no follow-up needed — email delivered"
+          : slackedAt
+            ? "no follow-up needed — Slack delivered"
+            : "no follow-up needed";
+    await setStage(id, "done", stageDetail);
     return NextResponse.json({
       followups: [],
-      emailSubject: null,
-      emailDraft: null,
+      emailSubject: subject,
+      emailDraft: deliveryBody,
       noFollowupSummary,
+      delivered: { email: !!emailedAt, slack: !!slackedAt },
     });
   }
 
@@ -306,6 +353,16 @@ async function runFollowup(
     followupReport: report,
     delivered: { email: !!emailedAt, slack: !!slackedAt, emailReason },
   });
+}
+
+function buildNoFollowupDeliveryMarkdown(
+  meetingTitle: string | null,
+  summaryBody: string,
+): string {
+  const title = meetingTitle ?? "your meeting";
+  const intro = `## DataDonkey check-in: ${title}\n\nI listened in and reviewed the transcript. **No data follow-up needed** — nothing was raised that data could meaningfully help with, and nothing in the topics warranted a proactive dig.`;
+  if (!summaryBody.trim()) return intro;
+  return `${intro}\n\n${summaryBody}`;
 }
 
 function buildNoFollowupMarkdown(s: {
