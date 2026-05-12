@@ -203,6 +203,7 @@ async function runFollowup(
       answered.push({
         question: q.question,
         reasoning: q.reasoning,
+        source: q.source,
         answer: result.answer || "(empty response from the model)",
         posthogUrls: extractPostHogUrls(result.answer),
         mcpPrompt: JSON.stringify(result.prompt),
@@ -213,6 +214,7 @@ async function runFollowup(
       answered.push({
         question: q.question,
         reasoning: q.reasoning,
+        source: q.source,
         answer: `_Couldn't answer this one — ${conn.provider.name} query errored: ${msg.slice(0, 200)}_`,
         posthogUrls: [],
         mcpPrompt: "",
@@ -224,6 +226,7 @@ async function runFollowup(
     answered.push({
       question: s.question,
       reasoning: s.reasoning,
+      source: s.source,
       answer: `_Skipped to keep the analysis under 60s — re-run "Generate" to answer this one._`,
       posthogUrls: [],
       mcpPrompt: "",
@@ -277,6 +280,7 @@ async function runFollowup(
       reasoning: a.reasoning,
       answer: a.answer ?? "",
       posthogUrls: a.posthogUrls,
+      source: a.source,
     })),
   });
 
@@ -387,6 +391,7 @@ function buildReportMarkdown(args: {
     reasoning: string;
     answer: string;
     posthogUrls?: string[];
+    source?: "explicit" | "proactive";
   }>;
 }): string {
   const sections: string[] = [];
@@ -401,10 +406,10 @@ function buildReportMarkdown(args: {
   }
   sections.push("---");
   const body = args.answered
-    .map(
-      (a, i) =>
-        `### ${i + 1}. ${a.question}\n\n_Why this came up:_ ${a.reasoning}\n\n${a.answer}\n`,
-    )
+    .map((a, i) => {
+      const badge = a.source === "proactive" ? " _(proactive)_" : "";
+      return `### ${i + 1}. ${a.question}${badge}\n\n_Why this came up:_ ${a.reasoning}\n\n${a.answer}\n`;
+    })
     .join("\n");
   sections.push(body);
   return sections.join("\n\n");

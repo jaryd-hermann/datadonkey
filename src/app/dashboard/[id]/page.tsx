@@ -17,6 +17,7 @@ interface Followup {
   reasoning: string;
   answer?: string;
   posthogUrls?: string[];
+  source?: "explicit" | "proactive";
 }
 
 interface Participant {
@@ -272,8 +273,18 @@ export default function MeetingDetail({
                   key={i}
                   className="rounded-md border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950"
                 >
-                  <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    Q{i + 1}. {f.question}
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      Q{i + 1}. {f.question}
+                    </div>
+                    {f.source === "proactive" && (
+                      <span
+                        title="Bot raised this proactively — no one asked, but it judged the topic worth digging into."
+                        className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                      >
+                        Proactive
+                      </span>
+                    )}
                   </div>
                   {f.reasoning && (
                     <div className="mt-1 text-xs italic text-zinc-500">{f.reasoning}</div>
