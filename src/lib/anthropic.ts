@@ -451,6 +451,10 @@ export interface FollowupQuestion {
   reasoning: string;
   answer?: string;
   posthogUrls?: string[];
+  // "explicit" = raised in the conversation; "proactive" = the bot anticipated
+  // it from the topics discussed. Optional for backwards compatibility with
+  // older rows; treat missing as "explicit".
+  source?: "explicit" | "proactive";
 }
 
 export interface EmailDraft {
@@ -499,27 +503,47 @@ export async function analyzeTranscriptWithUsage(
         // Sonnet is plenty for JSON extraction and 3-5x faster than Opus.
         model: "claude-sonnet-4-6",
         max_tokens: 4096,
-        system: `You read meeting transcripts and extract every concrete, data-shaped
-question raised in the conversation. The follow-up report is the durable record of
-all data discussed in the call, so include questions even if they were answered
-live in-call. Include all three kinds:
-  1. Questions addressed directly to the bot ("Hey PostHog, …", "Hey Post, …")
-  2. Questions raised in monologue (a single speaker thinking out loud)
-  3. Questions raised in team discussion
+        system: `You are an embedded data-driven PM listening to a team meeting. You read the transcript and surface follow-up questions worth answering with PostHog data — both questions the team asked AND questions a sharp PM would proactively raise from what they heard.
 
-Rules:
-- Answer must plausibly come from PostHog (event analytics, feature flags,
-  experiments, dashboards, error tracking, session recordings).
+Return questions in two categories:
+
+1. EXPLICIT — questions actually raised in the conversation. Include all three kinds:
+   a. Addressed directly to the bot ("Hey PostHog, …", "Hey Post, …")
+   b. Raised in monologue (a single speaker thinking out loud)
+   c. Raised in team discussion
+   Include even if answered live in-call — the follow-up report is the durable record of every data question discussed.
+
+2. PROACTIVE — questions the team did NOT raise but a data-driven PM would, because the answer would meaningfully inform a decision the team is actively making. Hard limits:
+   - AT MOST 2 proactive questions per meeting. Quality over volume — skip a marginal one.
+   - Must be anchored to a SPECIFIC topic actually discussed in the transcript. Do not invent context.
+   - The answer must plausibly already exist in product data. DO NOT propose questions about features that haven't shipped yet, code that hasn't been written, user behavior on something that doesn't exist, or hypothetical futures.
+   - Must pass the decision-relevance test: would knowing the answer plausibly change a decision the team is actively considering? If the topic is qualitative (org/process/strategy chat) or already decided, skip.
+   - Skip generic vanity-metric fishing ("what's our DAU?") unless the team specifically anchored on that metric.
+
+Rules for all questions:
+- Answer must plausibly come from PostHog (event analytics, feature flags, experiments, dashboards, error tracking, session recordings).
+- Each question must be self-contained — no "this", "that thing", "the X we discussed". Reconstruct context from the surrounding utterances (e.g. "in the last seven days", "the new checkout page launched last week").
 - Skip rhetorical questions, hypotheticals, opinions, and anything not data-shaped.
-- 0–5 items. If genuinely nothing data-shaped came up, return [].
-- Each question must be self-contained (no "this", "that thing", "the X we
-  discussed" — replace with the concrete subject). Reconstruct context from
-  surrounding utterances when needed (e.g. "in the last seven days").
-- Deduplicate near-identical questions, but keep distinct variants
-  (e.g. "how many visitors" and "where did visitors come from" are distinct).
+- Deduplicate near-identical questions, but keep distinct variants ("how many visitors" vs "where did visitors come from" are distinct).
+- 0-5 items TOTAL across both categories. If genuinely nothing data-shaped came up AND nothing proactive passes the bar, return [].
+- Order: all explicit questions first, then proactive.
+- For PROACTIVE questions, the \`reasoning\` field MUST lead with "Proactive — " and explain (a) what specific topic in the transcript motivated it, (b) why knowing the answer would matter to a decision on the table.
 - Return ONLY a JSON array. No prose, no code fences.
 
-Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence why this came up>"}]`,
+Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence why this came up>", "source": "explicit" | "proactive"}]
+
+Worked example. Given a snippet like:
+  Alice: do you have an experiment running with hotels on the details page right now?
+  Bob: yeah, we flipped the new nav bar yesterday and we're watching conversion by product
+  Alice: nice — what's it sitting at?
+  Bob: roughly even, but only a day in
+You should return at minimum:
+  {"question": "What experiments are currently running on the hotels details page?", "reasoning": "Alice asked Bob directly in the call.", "source": "explicit"}
+  {"question": "What is the by-product conversion rate trend since the new nav bar shipped?", "reasoning": "Alice asked Bob for the live number; capturing it durably so it's not lost.", "source": "explicit"}
+And, as a proactive addition (because the team flipped a launch and is watching conversion casually rather than with a structured monitor):
+  {"question": "Is the new nav bar holding conversion across all major products day-over-day, or are any showing regression?", "reasoning": "Proactive — the team flipped the nav bar yesterday and is watching conversion informally; a per-product breakdown would catch regressions they might miss eyeballing the aggregate.", "source": "proactive"}
+
+Note how informal phrasing ("what's it sitting at?", "do you have…") still counts as explicit when the answer is data-shaped. Casual register is fine — the bar is whether PostHog could plausibly answer it.`,
         messages: [{ role: "user", content: transcript }],
       },
       { signal: ac.signal },
@@ -550,12 +574,15 @@ Schema: [{"question": "<self-contained question>", "reasoning": "<one-sentence w
   try {
     const parsed = JSON.parse(cleaned) as unknown;
     if (!Array.isArray(parsed)) return { questions: [], usage };
-    const questions = parsed.flatMap((p) => {
-      const obj = p as { question?: unknown; reasoning?: unknown };
+    const questions: FollowupQuestion[] = parsed.flatMap((p) => {
+      const obj = p as { question?: unknown; reasoning?: unknown; source?: unknown };
       if (typeof obj.question !== "string") return [];
+      const source: "explicit" | "proactive" =
+        obj.source === "proactive" ? "proactive" : "explicit";
       return [{
         question: obj.question,
         reasoning: typeof obj.reasoning === "string" ? obj.reasoning : "",
+        source,
       }];
     });
     return { questions, usage };
