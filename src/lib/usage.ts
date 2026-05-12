@@ -3,6 +3,7 @@ import { prisma } from "./db";
 // Anthropic API pricing (per 1M tokens) as of 2026-05.
 // Update these if pricing changes.
 export const PRICING = {
+  "claude-haiku-4-5": { input: 1.0, output: 5.0 },
   "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
   "claude-opus-4-7": { input: 15.0, output: 75.0 },
 } as const;
@@ -13,7 +14,7 @@ const RECALL_PER_HOUR_USD = 0.5;
 export type ModelId = keyof typeof PRICING;
 
 export interface UsageEntry {
-  stage: "analyze" | "strategic" | "preamble" | "summary" | "live" | "other";
+  stage: "cleanup" | "analyze" | "strategic" | "preamble" | "summary" | "live" | "other";
   model: string;
   inputTokens: number;
   outputTokens: number;

@@ -4,6 +4,7 @@ import {
   analyzeTranscriptWithUsage,
   askDataToolStrategic,
   buildReportPreamble,
+  cleanTranscriptWithUsage,
   extractPostHogUrls,
   summarizeNonDataMeetingWithUsage,
   type FollowupQuestion,
@@ -71,10 +72,31 @@ async function runFollowup(
   console.log(`[followup] START meeting=${id} transcript=${meeting.transcript!.length}c`);
   await prisma.meeting.update({ where: { id }, data: { followupAttempted: true } });
 
+  // Step 0: clean the raw STT transcript. Recall/Deepgram captures every
+  // disfluency and partial word verbatim, and the analyzer chokes on the
+  // noise. Haiku reflows the transcript into clean turns first. Fails soft:
+  // if cleanup errors/times out, we fall back to the original transcript.
+  await setStage(id, "reviewing", "cleaning transcript");
+  const rawTranscript = meeting.transcript ?? "";
+  const cleaned = await cleanTranscriptWithUsage(rawTranscript);
+  if (cleaned.ok) {
+    await recordUsage(id, {
+      stage: "cleanup",
+      model: cleaned.usage.model,
+      inputTokens: cleaned.usage.inputTokens,
+      outputTokens: cleaned.usage.outputTokens,
+    });
+    console.log(
+      `[followup] cleaned transcript ${rawTranscript.length}c -> ${cleaned.text.length}c in ${Date.now() - tStart}ms`,
+    );
+  } else {
+    console.warn(`[followup] cleanup failed for meeting=${id}, falling back to raw transcript`);
+  }
+  const workingTranscript = cleaned.ok ? cleaned.text : rawTranscript;
+
   // Step 1: identify questions worth answering
-  await setStage(id, "reviewing");
   await setStage(id, "analyzing");
-  const analyzeResult = await analyzeTranscriptWithUsage(meeting.transcript ?? "");
+  const analyzeResult = await analyzeTranscriptWithUsage(workingTranscript);
   const identified = analyzeResult.questions;
   await recordUsage(id, {
     stage: "analyze",
@@ -91,7 +113,7 @@ async function runFollowup(
     // confirmation that the product ran is more valuable to a new user than
     // the silence of "nothing arrived in your inbox."
     await setStage(id, "analyzing", "summarizing themes");
-    const summary = await summarizeNonDataMeetingWithUsage(meeting.transcript ?? "");
+    const summary = await summarizeNonDataMeetingWithUsage(workingTranscript);
     await recordUsage(id, {
       stage: "summary",
       model: summary.usage.model,
