@@ -299,6 +299,132 @@ Answer it now using the data, with footnotes for the events and date ranges you 
   };
 }
 
+// Recall/Deepgram transcripts capture every disfluency, partial word, and
+// false start verbatim. The downstream analyzer chokes on the noise — it
+// can't extract clean self-contained questions from "we just turn it on and
+// just see conversion, like, fifty fifty something like that?" so it gives
+// up and returns []. This pre-pass uses Haiku (fast + cheap) to reflow the
+// transcript into clean turns while preserving speakers and meaning.
+//
+// Fails soft: if the cleanup call errors or times out, the caller should
+// use the original transcript — the analyzer can still try.
+export interface CleanedTranscript {
+  text: string;  // cleaned transcript; empty string on failure
+  usage: { model: string; inputTokens: number; outputTokens: number };
+  ok: boolean;
+}
+
+const CLEANUP_SYSTEM_PROMPT = `You clean up raw speech-to-text meeting transcripts so downstream analysis can extract clean questions and topics. Input format is one line per turn: \`Speaker: text\`.
+
+Your job:
+- Remove disfluencies: "um", "uh", "like", "you know", "I mean", "so", and similar filler when used as filler.
+- Stitch together broken sentences that span multiple turns by the same speaker (transcripts often split a single thought across lines mid-word).
+- Drop or merge tiny acknowledgements ("yeah", "right", "mhmm", "ok") UNLESS they are direct, meaningful answers to a preceding question. Don't lose substantive content.
+- Remove false starts where the speaker abandons a sentence and restarts — keep only the completed thought.
+- Fix obviously misheard words when context makes them clear (e.g. "post hoc" not "post hawk").
+- Preserve every speaker's identity and turn order — DO NOT merge across speakers.
+- Preserve every concrete number, metric, name, date, feature, and technical term verbatim. Never invent numbers.
+- Preserve question marks — they're the strongest signal for the downstream analyzer.
+- DO NOT summarize, paraphrase the meaning, or remove content that has any substantive value (even if conversational). This is a noise-reduction pass, not a summarization pass.
+- DO NOT add commentary, headers, or surrounding text. Output the cleaned transcript directly, same \`Speaker: text\` format, one turn per line.
+
+If the input is already clean, return it essentially unchanged.`;
+
+// Chunk transcript on speaker-turn boundaries so each Haiku call stays well
+// inside the SDK's non-streaming budget. Each chunk targets ~16k chars input
+// (~4k tokens), which lets max_tokens stay at 4096 and runs in ~5-10s.
+function chunkTranscriptByTurns(transcript: string, targetChunkChars = 16_000): string[] {
+  const lines = transcript.split("\n");
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let currentLen = 0;
+  for (const line of lines) {
+    if (currentLen + line.length + 1 > targetChunkChars && current.length > 0) {
+      chunks.push(current.join("\n"));
+      current = [];
+      currentLen = 0;
+    }
+    current.push(line);
+    currentLen += line.length + 1;
+  }
+  if (current.length > 0) chunks.push(current.join("\n"));
+  return chunks;
+}
+
+async function cleanOneChunk(
+  chunk: string,
+): Promise<{ text: string; ok: boolean; inputTokens: number; outputTokens: number }> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 45_000);
+  try {
+    const res = await anthropic.messages.create(
+      {
+        model: "claude-haiku-4-5",
+        max_tokens: 4096,
+        system: CLEANUP_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: chunk }],
+      },
+      { signal: ac.signal },
+    );
+    const text = res.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
+      .join("\n")
+      .trim();
+    if (!text) return { text: "", ok: false, inputTokens: 0, outputTokens: 0 };
+    return {
+      text,
+      ok: true,
+      inputTokens: res.usage.input_tokens,
+      outputTokens: res.usage.output_tokens,
+    };
+  } catch (err) {
+    console.warn("[cleanTranscript] chunk failed:", err);
+    return { text: "", ok: false, inputTokens: 0, outputTokens: 0 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function cleanTranscriptWithUsage(
+  transcript: string,
+): Promise<CleanedTranscript> {
+  const empty: CleanedTranscript = {
+    text: "",
+    usage: { model: "claude-haiku-4-5", inputTokens: 0, outputTokens: 0 },
+    ok: false,
+  };
+  if (!transcript.trim()) return empty;
+
+  const chunks = chunkTranscriptByTurns(transcript);
+  // Parallel: each chunk runs independently against Haiku. Per-chunk failures
+  // fall back to the raw chunk so we never lose content.
+  const results = await Promise.all(chunks.map((c) => cleanOneChunk(c).then((r) => ({ ...r, raw: c }))));
+
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let anyOk = false;
+  const parts: string[] = [];
+  for (const r of results) {
+    if (r.ok) {
+      anyOk = true;
+      inputTokens += r.inputTokens;
+      outputTokens += r.outputTokens;
+      parts.push(r.text);
+    } else {
+      // Fall back to raw chunk so we don't lose content.
+      parts.push(r.raw);
+    }
+  }
+  if (!anyOk) return empty;
+
+  return {
+    text: parts.join("\n"),
+    usage: { model: "claude-haiku-4-5", inputTokens, outputTokens },
+    ok: true,
+  };
+}
+
 // When analyzeTranscript surfaces zero data questions, we still want to give
 // the user a signal that the bot read the transcript. Summarizes the main
 // themes + why nothing data-shaped came up. UI-only — not emailed.
